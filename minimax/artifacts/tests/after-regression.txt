@@ -1,0 +1,19 @@
+$ D:\.hyper\project\OceanBase\PowerContext-minimax\minimax\.venv\Scripts\python.exe -m pytest -v -k regression
+
+--- stdout ---
+============================= test session starts =============================
+platform win32 -- Python 3.12.14, pytest-9.2.0, pluggy-1.7.0
+rootdir: D:\.hyper\project\OceanBase\PowerContext-minimax\minimax\sample
+configfile: pytest.ini (WARNING: ignoring pytest config in pyproject.toml!)
+testpaths: tests
+plugins: anyio-4.15.1, platformdirs-4.13.7
+collected 26 items / 6 deselected / 20 selected
+
+tests\test_invoice.py ...                                                [ 15%]
+tests\test_money.py ........                                             [ 55%]
+tests\test_pricing.py .........                                          [100%]
+
+====================== 20 passed, 6 deselected in 0.04s =======================
+
+--- stderr ---
+

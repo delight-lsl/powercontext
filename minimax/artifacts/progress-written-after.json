@@ -1,0 +1,12 @@
+{
+  "generated_at": "2026-10-28T13:21:40.415090+00:00",
+  "entries": [
+    {
+      "artifact_id": "art_1b34b01a17644b88a2de09d0d49309d4",
+      "revision": 1,
+      "kind": "validation",
+      "text": "改动后：全量测试通过（exit=0），回归测试与目标功能测试均通过 / post-change: full suite exit=0, regression and target functional suites pass",
+      "state": "active"
+    }
+  ]
+}

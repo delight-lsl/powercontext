@@ -1,0 +1,103 @@
+{
+  "generated_at": "2026-10-28T13:21:40.556968+00:00",
+  "steps": [
+    {
+      "name": "ingest corpus into PowerContext",
+      "command": "python -m sddctx ingest --project sample",
+      "exit_code": 0,
+      "detail": "scope=scp_2fervhjt293vd3eym9mdjn5q18 records=47 {'spec_section': 12, 'code_symbol': 9, 'test_case': 26}",
+      "at": "2026-10-28T13:21:34.769845+00:00"
+    },
+    {
+      "name": "retrieve development context",
+      "command": "python -m sddctx query --task \"为发票总价增加促销码折扣能力，先折扣后计税\"",
+      "exit_code": 0,
+      "detail": "specs=12 code=7 functional=6 regression=20",
+      "at": "2026-10-28T13:21:34.895636+00:00"
+    },
+    {
+      "name": "write task progress into PowerContext",
+      "command": "python -m sddctx state save --kind progress --text \"...\"",
+      "exit_code": 0,
+      "detail": "artifacts=['art_958cc0f74c7a4a6994c8273c2d310349', 'art_0f2cb96fa39b47bfb3dbe9111f8bee34']",
+      "at": "2026-10-28T13:21:35.114414+00:00"
+    },
+    {
+      "name": "test suite before the change",
+      "command": "D:\\.hyper\\project\\OceanBase\\PowerContext-minimax\\minimax\\.venv\\Scripts\\python.exe -m pytest -v",
+      "exit_code": 1,
+      "detail": "log=artifacts/tests/before.txt duration=0.91s",
+      "at": "2026-10-28T13:21:36.027901+00:00"
+    },
+    {
+      "name": "regression suite before the change",
+      "command": "D:\\.hyper\\project\\OceanBase\\PowerContext-minimax\\minimax\\.venv\\Scripts\\python.exe -m pytest -v -k regression",
+      "exit_code": 0,
+      "detail": "log=artifacts/tests/before-regression.txt duration=0.73s",
+      "at": "2026-10-28T13:21:36.763572+00:00"
+    },
+    {
+      "name": "target functional suite before the change",
+      "command": "D:\\.hyper\\project\\OceanBase\\PowerContext-minimax\\minimax\\.venv\\Scripts\\python.exe -m pytest -v -k promo",
+      "exit_code": 1,
+      "detail": "log=artifacts/tests/before-functional.txt duration=0.83s",
+      "at": "2026-10-28T13:21:37.595104+00:00"
+    },
+    {
+      "name": "MiniMax code generation",
+      "command": "python -m sddctx minimax --task ...",
+      "exit_code": 4,
+      "detail": "error=insufficient balance (1008) code=1008 http=402",
+      "at": "2026-10-28T13:21:38.075307+00:00"
+    },
+    {
+      "name": "apply the reference implementation to the working tree",
+      "command": "copy reference/pricing_promo.py -> sample/src/billing/pricing.py",
+      "exit_code": 0,
+      "detail": "diff=artifacts/reference/code.diff",
+      "at": "2026-10-28T13:21:38.090913+00:00"
+    },
+    {
+      "name": "test suite after the change",
+      "command": "D:\\.hyper\\project\\OceanBase\\PowerContext-minimax\\minimax\\.venv\\Scripts\\python.exe -m pytest -v",
+      "exit_code": 0,
+      "detail": "log=artifacts/tests/after.txt duration=0.75s",
+      "at": "2026-10-28T13:21:38.850204+00:00"
+    },
+    {
+      "name": "regression suite after the change",
+      "command": "D:\\.hyper\\project\\OceanBase\\PowerContext-minimax\\minimax\\.venv\\Scripts\\python.exe -m pytest -v -k regression",
+      "exit_code": 0,
+      "detail": "log=artifacts/tests/after-regression.txt duration=0.71s",
+      "at": "2026-10-28T13:21:39.566525+00:00"
+    },
+    {
+      "name": "target functional suite after the change",
+      "command": "D:\\.hyper\\project\\OceanBase\\PowerContext-minimax\\minimax\\.venv\\Scripts\\python.exe -m pytest -v -k promo",
+      "exit_code": 0,
+      "detail": "log=artifacts/tests/after-functional.txt duration=0.74s",
+      "at": "2026-10-28T13:21:40.308302+00:00"
+    },
+    {
+      "name": "write the after-change verification result into PowerContext",
+      "command": "python -m sddctx state save --kind validation --text \"...\"",
+      "exit_code": 0,
+      "detail": "artifact=art_1b34b01a17644b88a2de09d0d49309d4",
+      "at": "2026-10-28T13:21:40.415615+00:00"
+    },
+    {
+      "name": "restore the pre-change working tree",
+      "command": "copy artifacts/snapshots/before -> sample",
+      "exit_code": 0,
+      "detail": "restored_trees=3",
+      "at": "2026-10-28T13:21:40.426680+00:00"
+    },
+    {
+      "name": "retrieve the context again with the stored progress",
+      "command": "python -m sddctx query --task \"为发票总价增加促销码折扣能力，先折扣后计税\"",
+      "exit_code": 0,
+      "detail": "prior_progress=3 specs=12 code=7 functional=6 regression=20",
+      "at": "2026-10-28T13:21:40.555345+00:00"
+    }
+  ]
+}

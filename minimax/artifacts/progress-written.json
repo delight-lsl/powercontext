@@ -1,0 +1,19 @@
+{
+  "generated_at": "2026-10-28T13:21:35.113735+00:00",
+  "entries": [
+    {
+      "artifact_id": "art_958cc0f74c7a4a6994c8273c2d310349",
+      "revision": 1,
+      "kind": "progress",
+      "text": "已将 47 条 SDD 记录导入 PowerContext 作用域 scp_2fervhjt293vd3eym9mdjn5q18 / imported 47 SDD records into scope scp_2fervhjt293vd3eym9mdjn5q18",
+      "state": "active"
+    },
+    {
+      "artifact_id": "art_0f2cb96fa39b47bfb3dbe9111f8bee34",
+      "revision": 1,
+      "kind": "validation",
+      "text": "改动前：20 个回归测试通过，6 个功能测试失败（促销码能力尚未实现） / pre-change: 20 regression tests pass, 6 functional tests fail",
+      "state": "active"
+    }
+  ]
+}

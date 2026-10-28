@@ -1,0 +1,258 @@
+{
+  "schema": "sddctx.spec-revision-proof.v1",
+  "generated_at": "2026-10-28T13:22:12.334377+00:00",
+  "scope_id": "scp_0gwh7r7fn7gcwzwnewendrm5kp",
+  "task": "实现发票促销码折扣并保持金额不变量",
+  "spec_file": "minimax/sample/specs/SPEC-BILL-001-invoice-promo-discount.md",
+  "spec_sha256_before": "d501c0167c7e418d141403b0f20dfd735ba9d684988bca29eee7ff9ab5c7d260",
+  "spec_sha256_after_edit": "d7f110809ec75d0c90402e56a1bc7b43ed470abd767061c01a23ed31440ce02f",
+  "spec_sha256_after_restore": "d501c0167c7e418d141403b0f20dfd735ba9d684988bca29eee7ff9ab5c7d260",
+  "verdict": {
+    "spec_sections_before": 12,
+    "spec_sections_after": 12,
+    "respecified_sections": 7,
+    "new_content_present_after_reimport": true,
+    "new_content_absent_before_edit": true,
+    "source_ids_changed": true,
+    "repository_restored": true,
+    "production_scope_untouched": true,
+    "passed": true
+  },
+  "stored_source_versions": "sddctx:v1:spec_section:SPEC-BILL-001#背景-background:5d4baa04af01\t1\nsddctx:v1:spec_section:SPEC-BILL-001#接口契约-interface-contract:f9be5a5c3bb1\t2\nsddctx:v1:spec_section:SPEC-BILL-001#促销码目录-promotion-catalog:13bbead34177\t3\nsddctx:v1:spec_section:SPEC-BILL-001#折扣计算规则-discount-rules:7a974a0a7887\t4\nsddctx:v1:spec_section:SPEC-BILL-001#错误行为-error-behaviour:c33c6c055d22\t5\nsddctx:v1:spec_section:SPEC-BILL-001#不变量-invariants-that-must-not-change:d1825e319a76\t6\nsddctx:v1:spec_section:SPEC-BILL-001#示例-examples:ce7df2d7ffe8\t7\nsddctx:v1:spec_section:SPEC-BILL-001#背景-background:b0ce76248b9e\t48\nsddctx:v1:spec_section:SPEC-BILL-001#接口契约-interface-contract:26b44736388a\t49\nsddctx:v1:spec_section:SPEC-BILL-001#促销码目录-promotion-catalog:2cf2853168b2\t50\nsddctx:v1:spec_section:SPEC-BILL-001#折扣计算规则-discount-rules:c2849be3b3bd\t51\nsddctx:v1:spec_section:SPEC-BILL-001#错误行为-error-behaviour:9b4606026482\t52\nsddctx:v1:spec_section:SPEC-BILL-001#不变量-invariants-that-must-not-change:8c60ac118b51\t53\nsddctx:v1:spec_section:SPEC-BILL-001#示例-examples:a344e8c7858b\t54",
+  "changed_sections": [
+    {
+      "record_id": "SPEC-BILL-001#不变量-invariants-that-must-not-change",
+      "change": "new source version",
+      "before": {
+        "title": "SPEC-BILL-001 不变量 (Invariants that must not change)",
+        "lines": [
+          75,
+          81
+        ],
+        "source_id": "sddctx:v1:spec_section:SPEC-BILL-001#不变量-invariants-that-must-not-change:d1825e319a76",
+        "db_position": 6,
+        "file_sha256": "d501c0167c7e418d141403b0f20dfd735ba9d684988bca29eee7ff9ab5c7d260",
+        "text": "\n- `subtotal` 的计算方式不变。\n- 无促销码时 `discount == 0.00`，`tax == round(subtotal * tax_rate, 2)`。\n- 金额一律使用 `Decimal` 与 `ROUND_HALF_UP`，禁止使用浮点数。\n- 税率必须为 `Decimal` 且非负，否则抛出 `PricingError`。"
+      },
+      "after": {
+        "title": "SPEC-BILL-001 不变量 (Invariants that must not change)",
+        "lines": [
+          76,
+          82
+        ],
+        "source_id": "sddctx:v1:spec_section:SPEC-BILL-001#不变量-invariants-that-must-not-change:8c60ac118b51",
+        "db_position": 53,
+        "file_sha256": "d7f110809ec75d0c90402e56a1bc7b43ed470abd767061c01a23ed31440ce02f",
+        "text": "\n- `subtotal` 的计算方式不变。\n- 无促销码时 `discount == 0.00`，`tax == round(subtotal * tax_rate, 2)`。\n- 金额一律使用 `Decimal` 与 `ROUND_HALF_UP`，禁止使用浮点数。\n- 税率必须为 `Decimal` 且非负，否则抛出 `PricingError`。"
+      }
+    },
+    {
+      "record_id": "SPEC-BILL-001#背景-background",
+      "change": "new source version",
+      "before": {
+        "title": "SPEC-BILL-001 背景 (Background)",
+        "lines": [
+          28,
+          35
+        ],
+        "source_id": "sddctx:v1:spec_section:SPEC-BILL-001#背景-background:5d4baa04af01",
+        "db_position": 1,
+        "file_sha256": "d501c0167c7e418d141403b0f20dfd735ba9d684988bca29eee7ff9ab5c7d260",
+        "text": "\n当前 `billing.pricing.compute_invoice_totals` 只能计算\"小计 + 税\"的发票总价，\n没有促销码能力。商务侧要求在开票时允许客户使用促销码抵扣，并在发票上体现\n折扣行。本规格定义该能力的新行为。\n\n新行为之外的所有既有行为（见 `SPEC-BILL-002`）必须保持不变。"
+      },
+      "after": {
+        "title": "SPEC-BILL-001 背景 (Background)",
+        "lines": [
+          28,
+          35
+        ],
+        "source_id": "sddctx:v1:spec_section:SPEC-BILL-001#背景-background:b0ce76248b9e",
+        "db_position": 48,
+        "file_sha256": "d7f110809ec75d0c90402e56a1bc7b43ed470abd767061c01a23ed31440ce02f",
+        "text": "\n当前 `billing.pricing.compute_invoice_totals` 只能计算\"小计 + 税\"的发票总价，\n没有促销码能力。商务侧要求在开票时允许客户使用促销码抵扣，并在发票上体现\n折扣行。本规格定义该能力的新行为。\n\n新行为之外的所有既有行为（见 `SPEC-BILL-002`）必须保持不变。"
+      }
+    },
+    {
+      "record_id": "SPEC-BILL-001#折扣计算规则-discount-rules",
+      "change": "new source version",
+      "before": {
+        "title": "SPEC-BILL-001 折扣计算规则 (Discount rules)",
+        "lines": [
+          56,
+          67
+        ],
+        "source_id": "sddctx:v1:spec_section:SPEC-BILL-001#折扣计算规则-discount-rules:7a974a0a7887",
+        "db_position": 4,
+        "file_sha256": "d501c0167c7e418d141403b0f20dfd735ba9d684988bca29eee7ff9ab5c7d260",
+        "text": "\n设 `subtotal` 为小计金额，`p` 为促销码对应的 `percent_off` 与 `max_discount`：\n\n1. 原始折扣 `raw = subtotal * percent_off / 100`，按 `ROUND_HALF_UP` 保留两位小数。\n2. 实际折扣 `discount = min(raw, max_discount, subtotal)`。\n3. 折扣金额不得为负，且 `discount <= subtotal`，因此 `total` 永远不小于 0。\n4. 税基为 `subtotal - discount`，即**先折扣、后计税**。\n5. `tax = round((subtotal - discount) * tax_rate, 2)`，同样使用 `ROUND_HALF_UP`。\n6. `total = subtotal - discount + tax`。\n7. `InvoiceTotals.discount` 必须返回实际折扣金额；无促销码时为 `0.00`。"
+      },
+      "after": {
+        "title": "SPEC-BILL-001 折扣计算规则 (Discount rules)",
+        "lines": [
+          57,
+          68
+        ],
+        "source_id": "sddctx:v1:spec_section:SPEC-BILL-001#折扣计算规则-discount-rules:c2849be3b3bd",
+        "db_position": 51,
+        "file_sha256": "d7f110809ec75d0c90402e56a1bc7b43ed470abd767061c01a23ed31440ce02f",
+        "text": "\n设 `subtotal` 为小计金额，`p` 为促销码对应的 `percent_off` 与 `max_discount`：\n\n1. 原始折扣 `raw = subtotal * percent_off / 100`，按 `ROUND_HALF_UP` 保留两位小数。\n2. 实际折扣 `discount = min(raw, max_discount, subtotal)`。\n3. 折扣金额不得为负，且 `discount <= subtotal`，因此 `total` 永远不小于 0。\n4. 税基为 `subtotal - discount`，即**先折扣、后计税**。\n5. `tax = round((subtotal - discount) * tax_rate, 2)`，同样使用 `ROUND_HALF_UP`。\n6. `total = subtotal - discount + tax`。\n7. `InvoiceTotals.discount` 必须返回实际折扣金额；无促销码时为 `0.00`。"
+      }
+    },
+    {
+      "record_id": "SPEC-BILL-001#接口契约-interface-contract",
+      "change": "new source version",
+      "before": {
+        "title": "SPEC-BILL-001 接口契约 (Interface contract)",
+        "lines": [
+          36,
+          45
+        ],
+        "source_id": "sddctx:v1:spec_section:SPEC-BILL-001#接口契约-interface-contract:f9be5a5c3bb1",
+        "db_position": 2,
+        "file_sha256": "d501c0167c7e418d141403b0f20dfd735ba9d684988bca29eee7ff9ab5c7d260",
+        "text": "\n- `compute_invoice_totals(items, *, tax_rate)` 必须继续可用且行为不变。\n- `compute_invoice_totals` 新增可选关键字参数 `promo_code: str | None = None`。\n  该参数是**关键字参数**，不得改变已有位置参数的含义。\n- 新增异常类型，均继承自既有 `PricingError`：\n  - `UnknownPromoError`：促销码不存在。\n  - `ExpiredPromoError`：促销码已过期。\n- 新增促销码目录 `PROMO_CATALOG`，为只读映射，键为促销码字符串。"
+      },
+      "after": {
+        "title": "SPEC-BILL-001 接口契约 (Interface contract)",
+        "lines": [
+          36,
+          45
+        ],
+        "source_id": "sddctx:v1:spec_section:SPEC-BILL-001#接口契约-interface-contract:26b44736388a",
+        "db_position": 49,
+        "file_sha256": "d7f110809ec75d0c90402e56a1bc7b43ed470abd767061c01a23ed31440ce02f",
+        "text": "\n- `compute_invoice_totals(items, *, tax_rate)` 必须继续可用且行为不变。\n- `compute_invoice_totals` 新增可选关键字参数 `promo_code: str | None = None`。\n  该参数是**关键字参数**，不得改变已有位置参数的含义。\n- 新增异常类型，均继承自既有 `PricingError`：\n  - `UnknownPromoError`：促销码不存在。\n  - `ExpiredPromoError`：促销码已过期。\n- 新增促销码目录 `PROMO_CATALOG`，为只读映射，键为促销码字符串。"
+      }
+    },
+    {
+      "record_id": "SPEC-BILL-001#促销码目录-promotion-catalog",
+      "change": "new source version",
+      "before": {
+        "title": "SPEC-BILL-001 促销码目录 (Promotion catalog)",
+        "lines": [
+          46,
+          55
+        ],
+        "source_id": "sddctx:v1:spec_section:SPEC-BILL-001#促销码目录-promotion-catalog:13bbead34177",
+        "db_position": 3,
+        "file_sha256": "d501c0167c7e418d141403b0f20dfd735ba9d684988bca29eee7ff9ab5c7d260",
+        "text": "\n目录中的促销码语义如下，`percent_off` 为百分比，`max_discount` 为折扣上限金额：\n\n| 促销码 | percent_off | max_discount | expires_on |\n| --- | --- | --- | --- |\n| `SAVE10` | 10 | 50.00 | 无 |\n| `SAVE20` | 20 | 100.00 | 无 |\n| `OLD15` | 15 | 30.00 | 2020-06-30（已过期） |"
+      },
+      "after": {
+        "title": "SPEC-BILL-001 促销码目录 (Promotion catalog)",
+        "lines": [
+          46,
+          56
+        ],
+        "source_id": "sddctx:v1:spec_section:SPEC-BILL-001#促销码目录-promotion-catalog:2cf2853168b2",
+        "db_position": 50,
+        "file_sha256": "d7f110809ec75d0c90402e56a1bc7b43ed470abd767061c01a23ed31440ce02f",
+        "text": "\n目录中的促销码语义如下，`percent_off` 为百分比，`max_discount` 为折扣上限金额：\n\n| 促销码 | percent_off | max_discount | expires_on |\n| --- | --- | --- | --- |\n| `SAVE10` | 10 | 50.00 | 无 |\n| `SAVE20` | 20 | 150.00 | 无 |\n| `OLD15` | 15 | 30.00 | 2020-06-30（已过期） |\n| `SAVE30` | 30 | 200.00 | 无 |"
+      }
+    },
+    {
+      "record_id": "SPEC-BILL-001#错误行为-error-behaviour",
+      "change": "new source version",
+      "before": {
+        "title": "SPEC-BILL-001 错误行为 (Error behaviour)",
+        "lines": [
+          68,
+          74
+        ],
+        "source_id": "sddctx:v1:spec_section:SPEC-BILL-001#错误行为-error-behaviour:c33c6c055d22",
+        "db_position": 5,
+        "file_sha256": "d501c0167c7e418d141403b0f20dfd735ba9d684988bca29eee7ff9ab5c7d260",
+        "text": "\n- `promo_code is None`：不应用任何折扣，行为与改动前完全一致。\n- `promo_code` 不在 `PROMO_CATALOG` 中：抛出 `UnknownPromoError`。\n- `promo_code` 已过期（`expires_on` 早于当前日期）：抛出 `ExpiredPromoError`。\n- 错误必须在计算任何金额之前抛出，不得返回部分结果。"
+      },
+      "after": {
+        "title": "SPEC-BILL-001 错误行为 (Error behaviour)",
+        "lines": [
+          69,
+          75
+        ],
+        "source_id": "sddctx:v1:spec_section:SPEC-BILL-001#错误行为-error-behaviour:9b4606026482",
+        "db_position": 52,
+        "file_sha256": "d7f110809ec75d0c90402e56a1bc7b43ed470abd767061c01a23ed31440ce02f",
+        "text": "\n- `promo_code is None`：不应用任何折扣，行为与改动前完全一致。\n- `promo_code` 不在 `PROMO_CATALOG` 中：抛出 `UnknownPromoError`。\n- `promo_code` 已过期（`expires_on` 早于当前日期）：抛出 `ExpiredPromoError`。\n- 错误必须在计算任何金额之前抛出，不得返回部分结果。"
+      }
+    },
+    {
+      "record_id": "SPEC-BILL-001#示例-examples",
+      "change": "new source version",
+      "before": {
+        "title": "SPEC-BILL-001 示例 (Examples)",
+        "lines": [
+          82,
+          95
+        ],
+        "source_id": "sddctx:v1:spec_section:SPEC-BILL-001#示例-examples:ce7df2d7ffe8",
+        "db_position": 7,
+        "file_sha256": "d501c0167c7e418d141403b0f20dfd735ba9d684988bca29eee7ff9ab5c7d260",
+        "text": "\n单件商品单价 `100.00`，税率 `10%`：\n\n| 场景 | subtotal | discount | tax | total |\n| --- | --- | --- | --- | --- |\n| 无促销码 | 100.00 | 0.00 | 10.00 | 110.00 |\n| `SAVE10` | 100.00 | 10.00 | 9.00 | 99.00 |\n\n小计 `1000.00`，税率 `10%`，促销码 `SAVE10`（上限 50.00）：\n\n| 场景 | subtotal | discount | tax | total |\n| --- | --- | --- | --- | --- |\n| `SAVE10`（触发上限） | 1000.00 | 50.00 | 95.00 | 1045.00 |"
+      },
+      "after": {
+        "title": "SPEC-BILL-001 示例 (Examples)",
+        "lines": [
+          83,
+          97
+        ],
+        "source_id": "sddctx:v1:spec_section:SPEC-BILL-001#示例-examples:a344e8c7858b",
+        "db_position": 54,
+        "file_sha256": "d7f110809ec75d0c90402e56a1bc7b43ed470abd767061c01a23ed31440ce02f",
+        "text": "\n单件商品单价 `100.00`，税率 `10%`：\n\n| 场景 | subtotal | discount | tax | total |\n| --- | --- | --- | --- | --- |\n| 无促销码 | 100.00 | 0.00 | 10.00 | 110.00 |\n| `SAVE10` | 100.00 | 10.00 | 9.00 | 99.00 |\n| `SAVE30` | 100.00 | 30.00 | 7.00 | 77.00 |\n\n小计 `1000.00`，税率 `10%`，促销码 `SAVE10`（上限 50.00）：\n\n| 场景 | subtotal | discount | tax | total |\n| --- | --- | --- | --- | --- |\n| `SAVE10`（触发上限） | 1000.00 | 50.00 | 95.00 | 1045.00 |"
+      }
+    }
+  ],
+  "report_before": "Task: 实现发票促销码折扣并保持金额不变量\nScope: scp_0gwh7r7fn7gcwzwnewendrm5kp\nCorpus records considered: 47\nFiles to modify: src/billing/pricing.py\n\n## Applicable specifications (12)\n- SPEC-BILL-001 不变量 (Invariants that must not change) | specs/SPEC-BILL-001-invoice-promo-discount.md:75-81 | score=0.7252 | sddctx:v1:spec_section:SPEC-BILL-001#不变量-invariants-that-must-not-change:d1825e319a76 | db_position=6 | file_sha256=d501c0167c7e418d141403b0f20dfd735ba9d684988bca29eee7ff9ab5c7d260 | server_digest=sha256:d2ea2a2925ee1b1e6548de149e484b3edfa5ceb4f9e53064e1b3181e1c27ecb7\n- SPEC-BILL-001 背景 (Background) | specs/SPEC-BILL-001-invoice-promo-discount.md:28-35 | score=0.7000 | sddctx:v1:spec_section:SPEC-BILL-001#背景-background:5d4baa04af01 | db_position=1 | file_sha256=d501c0167c7e418d141403b0f20dfd735ba9d684988bca29eee7ff9ab5c7d260 | server_digest=sha256:33addc17b6bc78fd195c945c9b819670ea26db45c91b2d10d5582fc777a7307c\n- SPEC-BILL-001 折扣计算规则 (Discount rules) | specs/SPEC-BILL-001-invoice-promo-discount.md:56-67 | score=0.6963 | sddctx:v1:spec_section:SPEC-BILL-001#折扣计算规则-discount-rules:7a974a0a7887 | db_position=4 | file_sha256=d501c0167c7e418d141403b0f20dfd735ba9d684988bca29eee7ff9ab5c7d260 | server_digest=sha256:198721ea340aa7804d63a149335c2674224936468e9532e1050c3befa1fa7cfa\n- SPEC-BILL-001 接口契约 (Interface contract) | specs/SPEC-BILL-001-invoice-promo-discount.md:36-45 | score=0.5626 | sddctx:v1:spec_section:SPEC-BILL-001#接口契约-interface-contract:f9be5a5c3bb1 | db_position=2 | file_sha256=d501c0167c7e418d141403b0f20dfd735ba9d684988bca29eee7ff9ab5c7d260 | server_digest=sha256:f14f1ef1c04cd6b730aa5d9fba2472ccf8f602a96773f2191803c1cfbe653d54\n- SPEC-BILL-001 促销码目录 (Promotion catalog) | specs/SPEC-BILL-001-invoice-promo-discount.md:46-55 | score=0.5589 | sddctx:v1:spec_section:SPEC-BILL-001#促销码目录-promotion-catalog:13bbead34177 | db_position=3 | file_sha256=d501c0167c7e418d141403b0f20dfd735ba9d684988bca29eee7ff9ab5c7d260 | server_digest=sha256:cd352b2f0c82dbc9f7a2a1ab50a32e63584c1e97ae8d765a63e33feb1d91d37f\n- SPEC-BILL-001 错误行为 (Error behaviour) | specs/SPEC-BILL-001-invoice-promo-discount.md:68-74 | score=0.5589 | sddctx:v1:spec_section:SPEC-BILL-001#错误行为-error-behaviour:c33c6c055d22 | db_position=5 | file_sha256=d501c0167c7e418d141403b0f20dfd735ba9d684988bca29eee7ff9ab5c7d260 | server_digest=sha256:bb2036ca3f3afa140f3091a172e5ce25df84b6cf60e5cd0026701e9078f338dc\n- SPEC-BILL-001 示例 (Examples) | specs/SPEC-BILL-001-invoice-promo-discount.md:82-95 | score=0.4841 | sddctx:v1:spec_section:SPEC-BILL-001#示例-examples:ce7df2d7ffe8 | db_position=7 | file_sha256=d501c0167c7e418d141403b0f20dfd735ba9d684988bca29eee7ff9ab5c7d260 | server_digest=sha256:af1d1689ef0a1475a773dc5bdf348510c8789b1760c5357f5bc3d9bfe534f539\n- SPEC-BILL-002 发票渲染 (Invoice rendering) | specs/SPEC-BILL-002-money-invariants.md:58-61 | score=0.3982 | sddctx:v1:spec_section:SPEC-BILL-002#发票渲染-invoice-rendering:1b54abbd9734 | db_position=12 | file_sha256=bff83dd0826df2785cb489a54c196faad7c3e7cb5320b53203e5e3d6c9701fa9 | server_digest=sha256:22de93fb0ac82255df113beb38c86e0348154f61e80188dea65ab9ae975f188a\n- SPEC-BILL-002 计税 (Tax) | specs/SPEC-BILL-002-money-invariants.md:46-52 | score=0.3196 | sddctx:v1:spec_section:SPEC-BILL-002#计税-tax:b20ac6cda6c4 | db_position=10 | file_sha256=bff83dd0826df2785cb489a54c196faad7c3e7cb5320b53203e5e3d6c9701fa9 | server_digest=sha256:37e871f1106ad422cb178c4cd9f6025dcbe233bd4820122f6a011bafd73e1a56\n- SPEC-BILL-002 小计 (Subtotal) | specs/SPEC-BILL-002-money-invariants.md:40-45 | score=0.2411 | sddctx:v1:spec_section:SPEC-BILL-002#小计-subtotal:339da10d97b0 | db_position=9 | file_sha256=bff83dd0826df2785cb489a54c196faad7c3e7cb5320b53203e5e3d6c9701fa9 | server_digest=sha256:8a22426ec0358012b03ae4813c551bec13f3c2bb41c7fa3bc827af0e2126cb94\n- SPEC-BILL-002 舍入 (Rounding) | specs/SPEC-BILL-002-money-invariants.md:53-57 | score=0.2411 | sddctx:v1:spec_section:SPEC-BILL-002#舍入-rounding:a7e7b8948bcf | db_position=11 | file_sha256=bff83dd0826df2785cb489a54c196faad7c3e7cb5320b53203e5e3d6c9701fa9 | server_digest=sha256:93e0c0215b44b1110f703c98f20ad0e6d00dab947d277a7e6722296d28db3f7b\n- SPEC-BILL-002 金额表示 (Money representation) | specs/SPEC-BILL-002-money-invariants.md:34-39 | score=0.2411 | sddctx:v1:spec_section:SPEC-BILL-002#金额表示-money-representation:07ced6879f83 | db_position=8 | file_sha256=bff83dd0826df2785cb489a54c196faad7c3e7cb5320b53203e5e3d6c9701fa9 | server_digest=sha256:e689298737e70442f8b1580dcec70a6c8838ae19c2ee8924b11782ff99a2f8cc\n\n## Code to modify (7)\n- billing.InvoiceTotals | src/billing/pricing.py:49-55 | score=0.0000 | sddctx:v1:code_symbol:billing.InvoiceTotals:c7203165cefc | db_position=19 | file_sha256=6a69111712e47e79ec9a207e7d7c4f33590b7fbf0ff1919d5d3505bbeb01b94c | server_digest=sha256:3e95dd799f31b6a6015a85ab841a87b972d09438aaad0580018ce49c31c01163\n- billing.LineItem | src/billing/pricing.py:30-45 | score=0.0000 | sddctx:v1:code_symbol:billing.LineItem:724def3ad26c | db_position=18 | file_sha256=6a69111712e47e79ec9a207e7d7c4f33590b7fbf0ff1919d5d3505bbeb01b94c | server_digest=sha256:f0ac2307f5a8cf745010ab705732b18b81df680941fb29dae97db4d54658afc8\n- billing.Money | src/billing/money.py:24-72 | score=0.0000 | sddctx:v1:code_symbol:billing.Money:920416fc29d2 | db_position=16 | file_sha256=45812cb90f24fb0398a108415c42c9147cc164d25b24967afd69fc4f36b1bbc1 | server_digest=sha256:32aa8c40220719b47c24bbbde8dcb8da0897af6d2a6f8980af5dfe313824412b\n- billing.MoneyError | src/billing/money.py:19-20 | score=0.0000 | sddctx:v1:code_symbol:billing.MoneyError:17291f2ed643 | db_position=15 | file_sha256=45812cb90f24fb0398a108415c42c9147cc164d25b24967afd69fc4f36b1bbc1 | server_digest=sha256:db3fa17af9429c6dfb2aa0416c19c26abe91ec96e544027352a18b4cc68559e2\n- billing.PricingError | src/billing/pricing.py:25-26 | score=0.0000 | sddctx:v1:code_symbol:billing.PricingError:0515c723287a | db_position=17 | file_sha256=6a69111712e47e79ec9a207e7d7c4f33590b7fbf0ff1919d5d3505bbeb01b94c | server_digest=sha256:24690518c5d5516bf56019602f6d82f2ff68957c67b3dc4072cf79e11580798f\n- billing.compute_invoice_totals | src/billing/pricing.py:66-87 | score=0.0000 | sddctx:v1:code_symbol:billing.compute_invoice_totals:4da3b814217c | db_position=21 | file_sha256=6a69111712e47e79ec9a207e7d7c4f33590b7fbf0ff1919d5d3505bbeb01b94c | server_digest=sha256:72efa14dffefab3265ff83c1cdd1d3a9d8cc222ec71a9e3a6c03a46fde359ca3\n- billing.compute_subtotal | src/billing/pricing.py:58-63 | score=0.0000 | sddctx:v1:code_symbol:billing.compute_subtotal:638f34b8b87c | db_position=20 | file_sha256=6a69111712e47e79ec9a207e7d7c4f33590b7fbf0ff1919d5d3505bbeb01b94c | server_digest=sha256:90f3edea15477105086b73d2707ec7fd40c31cd330d84fb805462443fe07ad87\n\n## Functional tests (6)\n- test_expired_promo_code_is_rejected | tests/test_pricing.py:120-122 | score=0.0000 | sddctx:v1:test_case:tests/test_pricing.py::test_expired_promo_code_is_rejected:54e94dcdbd14 | db_position=46 | file_sha256=c1aa6617008353759f86de1f6aa6469846061729f8a4dae3000e5b3dd65d24d9 | server_digest=sha256:155abc4f98b226e632b2cd53d974e56fca83177954a5e4a05c7052dfddefd9d2\n- test_promo_code_applies_a_percentage_discount_before_tax | tests/test_pricing.py:88-95 | score=0.0000 | sddctx:v1:test_case:tests/test_pricing.py::test_promo_code_applies_a_percentage_discount_before_tax:051ecad28f2e | db_position=42 | file_sha256=c1aa6617008353759f86de1f6aa6469846061729f8a4dae3000e5b3dd65d24d9 | server_digest=sha256:db1cf9282fd1e615077cf5db5919721821e215b5a5efe4891681b403f2a73be8\n- test_promo_discount_is_capped_by_the_maximum_discount | tests/test_pricing.py:98-104 | score=0.0000 | sddctx:v1:test_case:tests/test_pricing.py::test_promo_discount_is_capped_by_the_maximum_discount:78c6f02b998d | db_position=43 | file_sha256=c1aa6617008353759f86de1f6aa6469846061729f8a4dae3000e5b3dd65d24d9 | server_digest=sha256:0e34866e645d5c3cdc3069749188e985c0cf3ef8380f7c21219b541ecabd1bdd\n- test_promo_errors_are_pricing_errors | tests/test_pricing.py:125-127 | score=0.0000 | sddctx:v1:test_case:tests/test_pricing.py::test_promo_errors_are_pricing_errors:77c0c0b84ddd | db_position=47 | file_sha256=c1aa6617008353759f86de1f6aa6469846061729f8a4dae3000e5b3dd65d24d9 | server_digest=sha256:51e231e98a8968e0289b281348ecff1a138225942c718a9eebdab028e54417b1\n- test_promo_without_code_keeps_the_discount_at_zero | tests/test_pricing.py:107-112 | score=0.0000 | sddctx:v1:test_case:tests/test_pricing.py::test_promo_without_code_keeps_the_discount_at_zero:6632dd4c991f | db_position=44 | file_sha256=c1aa6617008353759f86de1f6aa6469846061729f8a4dae3000e5b3dd65d24d9 | server_digest=sha256:e6a1e02177bd6cd3cfe564b1cd9263ca86c00caf5d3b1e516e0ef03893a15d13\n- test_unknown_promo_code_is_rejected | tests/test_pricing.py:115-117 | score=0.0000 | sddctx:v1:test_case:tests/test_pricing.py::test_unknown_promo_code_is_rejected:02e990a601d6 | db_position=45 | file_sha256=c1aa6617008353759f86de1f6aa6469846061729f8a4dae3000e5b3dd65d24d9 | server_digest=sha256:2e615bb9a60cb9c7e0dee137e44d8aa86b35db943afb4265716993a931e0d0fe\n\n## Regression tests (20)\n- test_regression_invoice_keeps_the_invoice_identifier | tests/test_invoice.py:32-35 | score=0.0000 | sddctx:v1:test_case:tests/test_invoice.py::test_regression_invoice_keeps_the_invoice_identifier:ff79927be541 | db_position=24 | file_sha256=a20cf37f4cbf860f1f782b4c6e3e22b4b6163fa38b275cefa5c6d38ba959be6f | server_digest=sha256:0f6f6387d855733b8001b48d2d388e18fc5f9c370119fb2fd2fca5902546ba02\n- test_regression_invoice_lists_every_line_item | tests/test_invoice.py:26-29 | score=0.0000 | sddctx:v1:test_case:tests/test_invoice.py::test_regression_invoice_lists_every_line_item:3883ac29ce3a | db_position=23 | file_sha256=a20cf37f4cbf860f1f782b4c6e3e22b4b6163fa38b275cefa5c6d38ba959be6f | server_digest=sha256:e6f1df4c4549049f373e1f5b7fc8048f6ee29110b746a3f3fd7374ab7dddad9a\n- test_regression_invoice_renders_every_required_line | tests/test_invoice.py:16-23 | score=0.0000 | sddctx:v1:test_case:tests/test_invoice.py::test_regression_invoice_renders_every_required_line:b5ed3decd1c2 | db_position=22 | file_sha256=a20cf37f4cbf860f1f782b4c6e3e22b4b6163fa38b275cefa5c6d38ba959be6f | server_digest=sha256:03413f040761260f5a16bca81c5556430b44d21676e4dfe77605ec91e5e1e35f\n- test_regression_money_addition_and_subtraction | tests/test_money.py:27-29 | score=0.0000 | sddctx:v1:test_case:tests/test_money.py::test_regression_money_addition_and_subtraction:c15ca5441635 | db_position=28 | file_sha256=cc4d512668e2ef06c293030a1c53541aad90852e18198c63e6b8047bd82be8ff | server_digest=sha256:e8656e4dcf2947096ef688bd8f4f95044d331bc500cdac052180e15a9abb1db6\n- test_regression_money_rejects_non_decimal_amount | tests/test_money.py:17-19 | score=0.0000 | sddctx:v1:test_case:tests/test_money.py::test_regression_money_rejects_non_decimal_amount:0f6ee07d97bd | db_position=26 | file_sha256=cc4d512668e2ef06c293030a1c53541aad90852e18198c63e6b8047bd82be8ff | server_digest=sha256:bd63638fe35629424dfe4d5120cfca1a1e75d96231d3c4930a619eb1bf91f698\n- test_regression_money_rejects_non_finite_amount | tests/test_money.py:22-24 | score=0.0000 | sddctx:v1:test_case:tests/test_money.py::test_regression_money_rejects_non_finite_amount:f3eeb1b21be8 | db_position=27 | file_sha256=cc4d512668e2ef06c293030a1c53541aad90852e18198c63e6b8047bd82be8ff | server_digest=sha256:8504e0a11ea6cf54972f8b749353c7e48965830ba438f35be8fb5c095388a0cf\n- test_regression_money_rejects_non_integer_scaling | tests/test_money.py:36-38 | score=0.0000 | sddctx:v1:test_case:tests/test_money.py::test_regression_money_rejects_non_integer_scaling:a34706f8994f | db_position=30 | file_sha256=cc4d512668e2ef06c293030a1c53541aad90852e18198c63e6b8047bd82be8ff | server_digest=sha256:ebc759cababe98848e08fbae82cf911143d8586cf3940c5465000e76fe467d78\n- test_regression_money_rounds_to_cents_with_half_up | tests/test_money.py:12-14 | score=0.0000 | sddctx:v1:test_case:tests/test_money.py::test_regression_money_rounds_to_cents_with_half_up:214b052af1a5 | db_position=25 | file_sha256=cc4d512668e2ef06c293030a1c53541aad90852e18198c63e6b8047bd82be8ff | server_digest=sha256:bec67acfa49a051db5bad48f95f556d060c6681e26edeb94c993db3b5cccae07\n- test_regression_money_scaled_keeps_full_precision_until_quantize | tests/test_money.py:41-42 | score=0.0000 | sddctx:v1:test_case:tests/test_money.py::test_regression_money_scaled_keeps_full_precision_until_quantize:1f1e19a3ff3d | db_position=31 | file_sha256=cc4d512668e2ef06c293030a1c53541aad90852e18198c63e6b8047bd82be8ff | server_digest=sha256:6c00385fb2e5e89e0884592bf6f6c36ea1d6a657740a179b558d03149a6b704f\n- test_regression_money_scales_by_integer_quantity | tests/test_money.py:32-33 | score=0.0000 | sddctx:v1:test_case:tests/test_money.py::test_regression_money_scales_by_integer_quantity:9573ae6e7365 | db_position=29 | file_sha256=cc4d512668e2ef06c293030a1c53541aad90852e18198c63e6b8047bd82be8ff | server_digest=sha256:6f486f8a3e85b71081e6d6034afa37703c46bbe39e6b18fb70010ffb38aae316\n- test_regression_money_zero_and_string_form | tests/test_money.py:45-47 | score=0.0000 | sddctx:v1:test_case:tests/test_money.py::test_regression_money_zero_and_string_form:ff2b1c5033c5 | db_position=32 | file_sha256=cc4d512668e2ef06c293030a1c53541aad90852e18198c63e6b8047bd82be8ff | server_digest=sha256:544266080725f7223bb2017a62ba466e7cd844e68e4404ab30bd9b8bfd8fe109\n- test_regression_empty_order_has_zero_subtotal | tests/test_pricing.py:38-39 | score=0.0000 | sddctx:v1:test_case:tests/test_pricing.py::test_regression_empty_order_has_zero_subtotal:006441ae018c | db_position=34 | file_sha256=c1aa6617008353759f86de1f6aa6469846061729f8a4dae3000e5b3dd65d24d9 | server_digest=sha256:f303e5617ff498fe8a03b3194f4c4a5d0f16ee7ffa9f8005cb547db1fd01e950\n- test_regression_line_item_requires_a_sku | tests/test_pricing.py:78-80 | score=0.0000 | sddctx:v1:test_case:tests/test_pricing.py::test_regression_line_item_requires_a_sku:58a61a369d0d | db_position=41 | file_sha256=c1aa6617008353759f86de1f6aa6469846061729f8a4dae3000e5b3dd65d24d9 | server_digest=sha256:ecedf62c304e987c9293ee15ff55df60f4e7e209364def34121f0195fa99d4d1\n- test_regression_negative_tax_rate_is_rejected | tests/test_pricing.py:68-70 | score=0.0000 | sddctx:v1:test_case:tests/test_pricing.py::test_regression_negative_tax_rate_is_rejected:13f862bbc28a | db_position=39 | file_sha256=c1aa6617008353759f86de1f6aa6469846061729f8a4dae3000e5b3dd65d24d9 | server_digest=sha256:95ef152eb71094d1e1f247dfe6bd94da70f69de597c201320c512023099ab728\n- test_regression_non_decimal_tax_rate_is_rejected | tests/test_pricing.py:63-65 | score=0.0000 | sddctx:v1:test_case:tests/test_pricing.py::test_regression_non_decimal_tax_rate_is_rejected:c245b5fed30b | db_position=38 | file_sha256=c1aa6617008353759f86de1f6aa6469846061729f8a4dae3000e5b3dd65d24d9 | server_digest=sha256:e3a2a0a5380269a6dcc80ddf2c927bf4d04ee2eb91970b7fa520aebf61e5ff94\n- test_regression_non_positive_quantity_is_rejected | tests/test_pricing.py:73-75 | score=0.0000 | sddctx:v1:test_case:tests/test_pricing.py::test_regression_non_positive_quantity_is_rejected:e8228640fef7 | db_position=40 | file_sha256=c1aa6617008353759f86de1f6aa6469846061729f8a4dae3000e5b3dd65d24d9 | server_digest=sha256:d9e64aa34d6b370fd55c2ca9ba6473eee7660998541e481520f36d25ca3e9531\n- test_regression_subtotal_is_the_sum_of_line_totals | tests/test_pricing.py:33-35 | score=0.0000 | sddctx:v1:test_case:tests/test_pricing.py::test_regression_subtotal_is_the_sum_of_line_totals:d7e69e4c460c | db_position=33 | file_sha256=c1aa6617008353759f86de1f6aa6469846061729f8a4dae3000e5b3dd65d24d9 | server_digest=sha256:f9742381d1ff8b3843b4e3aaf8d2d4896e978299308839d5d67adf24833ee683\n- test_regression_tax_is_computed_on_the_subtotal | tests/test_pricing.py:42-47 | score=0.0000 | sddctx:v1:test_case:tests/test_pricing.py::test_regression_tax_is_computed_on_the_subtotal:c85c279d3dc1 | db_position=35 | file_sha256=c1aa6617008353759f86de1f6aa6469846061729f8a4dae3000e5b3dd65d24d9 | server_digest=sha256:6204822b4227bb11edd40fb2e34906b5f288ed202dbd553e10a3d32e1e52a60a\n- test_regression_tax_uses_round_half_up_not_bankers_rounding | tests/test_pricing.py:57-60 | score=0.0000 | sddctx:v1:test_case:tests/test_pricing.py::test_regression_tax_uses_round_half_up_not_bankers_rounding:cccca3da1ec1 | db_position=37 | file_sha256=c1aa6617008353759f86de1f6aa6469846061729f8a4dae3000e5b3dd65d24d9 | server_digest=sha256:455a60a2854698752e19b63fdccf72f7eaedd7a92cf5a0603e0c30be30c85295\n- test_regression_total_equals_subtotal_plus_tax | tests/test_pricing.py:50-54 | score=0.0000 | sddctx:v1:test_case:tests/test_pricing.py::test_regression_total_equals_subtotal_plus_tax:9d79f7464dea | db_position=36 | file_sha256=c1aa6617008353759f86de1f6aa6469846061729f8a4dae3000e5b3dd65d24d9 | server_digest=sha256:ddd2f27f074a2f1dcfe074d558b83070da8054677d3e31709d840b6bc3a73149",
+  "report_after": "Task: 实现发票促销码折扣并保持金额不变量\nScope: scp_0gwh7r7fn7gcwzwnewendrm5kp\nCorpus records considered: 47\nFiles to modify: src/billing/pricing.py\n\n## Applicable specifications (12)\n- SPEC-BILL-001 不变量 (Invariants that must not change) | specs/SPEC-BILL-001-invoice-promo-discount.md:76-82 | score=0.7252 | sddctx:v1:spec_section:SPEC-BILL-001#不变量-invariants-that-must-not-change:8c60ac118b51 | db_position=53 | file_sha256=d7f110809ec75d0c90402e56a1bc7b43ed470abd767061c01a23ed31440ce02f | server_digest=sha256:f16a7d60372cca55791177877998aa7ed6f78e72ed2fd18489fe7eaca488d260\n- SPEC-BILL-001 背景 (Background) | specs/SPEC-BILL-001-invoice-promo-discount.md:28-35 | score=0.7000 | sddctx:v1:spec_section:SPEC-BILL-001#背景-background:b0ce76248b9e | db_position=48 | file_sha256=d7f110809ec75d0c90402e56a1bc7b43ed470abd767061c01a23ed31440ce02f | server_digest=sha256:69d92f95d89cfe135e3b7c6f1f2e2732923d652ba92458aa65bd322254c83d13\n- SPEC-BILL-001 折扣计算规则 (Discount rules) | specs/SPEC-BILL-001-invoice-promo-discount.md:57-68 | score=0.6963 | sddctx:v1:spec_section:SPEC-BILL-001#折扣计算规则-discount-rules:c2849be3b3bd | db_position=51 | file_sha256=d7f110809ec75d0c90402e56a1bc7b43ed470abd767061c01a23ed31440ce02f | server_digest=sha256:529ee449c31153d3c9019fad5790d579ce5c39bb9eb02f575c9fe12140194793\n- SPEC-BILL-001 接口契约 (Interface contract) | specs/SPEC-BILL-001-invoice-promo-discount.md:36-45 | score=0.5626 | sddctx:v1:spec_section:SPEC-BILL-001#接口契约-interface-contract:26b44736388a | db_position=49 | file_sha256=d7f110809ec75d0c90402e56a1bc7b43ed470abd767061c01a23ed31440ce02f | server_digest=sha256:348856ab92ddccb4cec277d7dfda5956c4c36747fd3ace028f190a66b1639cad\n- SPEC-BILL-001 促销码目录 (Promotion catalog) | specs/SPEC-BILL-001-invoice-promo-discount.md:46-56 | score=0.5589 | sddctx:v1:spec_section:SPEC-BILL-001#促销码目录-promotion-catalog:2cf2853168b2 | db_position=50 | file_sha256=d7f110809ec75d0c90402e56a1bc7b43ed470abd767061c01a23ed31440ce02f | server_digest=sha256:f323278f740a035aa17df1eec003e32e6f896d0db998ba06b44df16b8760cea6\n- SPEC-BILL-001 错误行为 (Error behaviour) | specs/SPEC-BILL-001-invoice-promo-discount.md:69-75 | score=0.5589 | sddctx:v1:spec_section:SPEC-BILL-001#错误行为-error-behaviour:9b4606026482 | db_position=52 | file_sha256=d7f110809ec75d0c90402e56a1bc7b43ed470abd767061c01a23ed31440ce02f | server_digest=sha256:3fbeb57452a839f4a14a9c24c3833569d27ed4e91f6a2fe32b7a306d9147d667\n- SPEC-BILL-001 示例 (Examples) | specs/SPEC-BILL-001-invoice-promo-discount.md:83-97 | score=0.4841 | sddctx:v1:spec_section:SPEC-BILL-001#示例-examples:a344e8c7858b | db_position=54 | file_sha256=d7f110809ec75d0c90402e56a1bc7b43ed470abd767061c01a23ed31440ce02f | server_digest=sha256:19cd43fdc91f391e0e84bc8957ad5d5af3e60638860c4d8fd0284f372ced4e75\n- SPEC-BILL-002 发票渲染 (Invoice rendering) | specs/SPEC-BILL-002-money-invariants.md:58-61 | score=0.3982 | sddctx:v1:spec_section:SPEC-BILL-002#发票渲染-invoice-rendering:1b54abbd9734 | db_position=12 | file_sha256=bff83dd0826df2785cb489a54c196faad7c3e7cb5320b53203e5e3d6c9701fa9 | server_digest=sha256:22de93fb0ac82255df113beb38c86e0348154f61e80188dea65ab9ae975f188a\n- SPEC-BILL-002 计税 (Tax) | specs/SPEC-BILL-002-money-invariants.md:46-52 | score=0.3196 | sddctx:v1:spec_section:SPEC-BILL-002#计税-tax:b20ac6cda6c4 | db_position=10 | file_sha256=bff83dd0826df2785cb489a54c196faad7c3e7cb5320b53203e5e3d6c9701fa9 | server_digest=sha256:37e871f1106ad422cb178c4cd9f6025dcbe233bd4820122f6a011bafd73e1a56\n- SPEC-BILL-002 小计 (Subtotal) | specs/SPEC-BILL-002-money-invariants.md:40-45 | score=0.2411 | sddctx:v1:spec_section:SPEC-BILL-002#小计-subtotal:339da10d97b0 | db_position=9 | file_sha256=bff83dd0826df2785cb489a54c196faad7c3e7cb5320b53203e5e3d6c9701fa9 | server_digest=sha256:8a22426ec0358012b03ae4813c551bec13f3c2bb41c7fa3bc827af0e2126cb94\n- SPEC-BILL-002 舍入 (Rounding) | specs/SPEC-BILL-002-money-invariants.md:53-57 | score=0.2411 | sddctx:v1:spec_section:SPEC-BILL-002#舍入-rounding:a7e7b8948bcf | db_position=11 | file_sha256=bff83dd0826df2785cb489a54c196faad7c3e7cb5320b53203e5e3d6c9701fa9 | server_digest=sha256:93e0c0215b44b1110f703c98f20ad0e6d00dab947d277a7e6722296d28db3f7b\n- SPEC-BILL-002 金额表示 (Money representation) | specs/SPEC-BILL-002-money-invariants.md:34-39 | score=0.2411 | sddctx:v1:spec_section:SPEC-BILL-002#金额表示-money-representation:07ced6879f83 | db_position=8 | file_sha256=bff83dd0826df2785cb489a54c196faad7c3e7cb5320b53203e5e3d6c9701fa9 | server_digest=sha256:e689298737e70442f8b1580dcec70a6c8838ae19c2ee8924b11782ff99a2f8cc\n\n## Code to modify (7)\n- billing.InvoiceTotals | src/billing/pricing.py:49-55 | score=0.0000 | sddctx:v1:code_symbol:billing.InvoiceTotals:c7203165cefc | db_position=19 | file_sha256=6a69111712e47e79ec9a207e7d7c4f33590b7fbf0ff1919d5d3505bbeb01b94c | server_digest=sha256:3e95dd799f31b6a6015a85ab841a87b972d09438aaad0580018ce49c31c01163\n- billing.LineItem | src/billing/pricing.py:30-45 | score=0.0000 | sddctx:v1:code_symbol:billing.LineItem:724def3ad26c | db_position=18 | file_sha256=6a69111712e47e79ec9a207e7d7c4f33590b7fbf0ff1919d5d3505bbeb01b94c | server_digest=sha256:f0ac2307f5a8cf745010ab705732b18b81df680941fb29dae97db4d54658afc8\n- billing.Money | src/billing/money.py:24-72 | score=0.0000 | sddctx:v1:code_symbol:billing.Money:920416fc29d2 | db_position=16 | file_sha256=45812cb90f24fb0398a108415c42c9147cc164d25b24967afd69fc4f36b1bbc1 | server_digest=sha256:32aa8c40220719b47c24bbbde8dcb8da0897af6d2a6f8980af5dfe313824412b\n- billing.MoneyError | src/billing/money.py:19-20 | score=0.0000 | sddctx:v1:code_symbol:billing.MoneyError:17291f2ed643 | db_position=15 | file_sha256=45812cb90f24fb0398a108415c42c9147cc164d25b24967afd69fc4f36b1bbc1 | server_digest=sha256:db3fa17af9429c6dfb2aa0416c19c26abe91ec96e544027352a18b4cc68559e2\n- billing.PricingError | src/billing/pricing.py:25-26 | score=0.0000 | sddctx:v1:code_symbol:billing.PricingError:0515c723287a | db_position=17 | file_sha256=6a69111712e47e79ec9a207e7d7c4f33590b7fbf0ff1919d5d3505bbeb01b94c | server_digest=sha256:24690518c5d5516bf56019602f6d82f2ff68957c67b3dc4072cf79e11580798f\n- billing.compute_invoice_totals | src/billing/pricing.py:66-87 | score=0.0000 | sddctx:v1:code_symbol:billing.compute_invoice_totals:4da3b814217c | db_position=21 | file_sha256=6a69111712e47e79ec9a207e7d7c4f33590b7fbf0ff1919d5d3505bbeb01b94c | server_digest=sha256:72efa14dffefab3265ff83c1cdd1d3a9d8cc222ec71a9e3a6c03a46fde359ca3\n- billing.compute_subtotal | src/billing/pricing.py:58-63 | score=0.0000 | sddctx:v1:code_symbol:billing.compute_subtotal:638f34b8b87c | db_position=20 | file_sha256=6a69111712e47e79ec9a207e7d7c4f33590b7fbf0ff1919d5d3505bbeb01b94c | server_digest=sha256:90f3edea15477105086b73d2707ec7fd40c31cd330d84fb805462443fe07ad87\n\n## Functional tests (6)\n- test_expired_promo_code_is_rejected | tests/test_pricing.py:120-122 | score=0.0000 | sddctx:v1:test_case:tests/test_pricing.py::test_expired_promo_code_is_rejected:54e94dcdbd14 | db_position=46 | file_sha256=c1aa6617008353759f86de1f6aa6469846061729f8a4dae3000e5b3dd65d24d9 | server_digest=sha256:155abc4f98b226e632b2cd53d974e56fca83177954a5e4a05c7052dfddefd9d2\n- test_promo_code_applies_a_percentage_discount_before_tax | tests/test_pricing.py:88-95 | score=0.0000 | sddctx:v1:test_case:tests/test_pricing.py::test_promo_code_applies_a_percentage_discount_before_tax:051ecad28f2e | db_position=42 | file_sha256=c1aa6617008353759f86de1f6aa6469846061729f8a4dae3000e5b3dd65d24d9 | server_digest=sha256:db1cf9282fd1e615077cf5db5919721821e215b5a5efe4891681b403f2a73be8\n- test_promo_discount_is_capped_by_the_maximum_discount | tests/test_pricing.py:98-104 | score=0.0000 | sddctx:v1:test_case:tests/test_pricing.py::test_promo_discount_is_capped_by_the_maximum_discount:78c6f02b998d | db_position=43 | file_sha256=c1aa6617008353759f86de1f6aa6469846061729f8a4dae3000e5b3dd65d24d9 | server_digest=sha256:0e34866e645d5c3cdc3069749188e985c0cf3ef8380f7c21219b541ecabd1bdd\n- test_promo_errors_are_pricing_errors | tests/test_pricing.py:125-127 | score=0.0000 | sddctx:v1:test_case:tests/test_pricing.py::test_promo_errors_are_pricing_errors:77c0c0b84ddd | db_position=47 | file_sha256=c1aa6617008353759f86de1f6aa6469846061729f8a4dae3000e5b3dd65d24d9 | server_digest=sha256:51e231e98a8968e0289b281348ecff1a138225942c718a9eebdab028e54417b1\n- test_promo_without_code_keeps_the_discount_at_zero | tests/test_pricing.py:107-112 | score=0.0000 | sddctx:v1:test_case:tests/test_pricing.py::test_promo_without_code_keeps_the_discount_at_zero:6632dd4c991f | db_position=44 | file_sha256=c1aa6617008353759f86de1f6aa6469846061729f8a4dae3000e5b3dd65d24d9 | server_digest=sha256:e6a1e02177bd6cd3cfe564b1cd9263ca86c00caf5d3b1e516e0ef03893a15d13\n- test_unknown_promo_code_is_rejected | tests/test_pricing.py:115-117 | score=0.0000 | sddctx:v1:test_case:tests/test_pricing.py::test_unknown_promo_code_is_rejected:02e990a601d6 | db_position=45 | file_sha256=c1aa6617008353759f86de1f6aa6469846061729f8a4dae3000e5b3dd65d24d9 | server_digest=sha256:2e615bb9a60cb9c7e0dee137e44d8aa86b35db943afb4265716993a931e0d0fe\n\n## Regression tests (20)\n- test_regression_invoice_keeps_the_invoice_identifier | tests/test_invoice.py:32-35 | score=0.0000 | sddctx:v1:test_case:tests/test_invoice.py::test_regression_invoice_keeps_the_invoice_identifier:ff79927be541 | db_position=24 | file_sha256=a20cf37f4cbf860f1f782b4c6e3e22b4b6163fa38b275cefa5c6d38ba959be6f | server_digest=sha256:0f6f6387d855733b8001b48d2d388e18fc5f9c370119fb2fd2fca5902546ba02\n- test_regression_invoice_lists_every_line_item | tests/test_invoice.py:26-29 | score=0.0000 | sddctx:v1:test_case:tests/test_invoice.py::test_regression_invoice_lists_every_line_item:3883ac29ce3a | db_position=23 | file_sha256=a20cf37f4cbf860f1f782b4c6e3e22b4b6163fa38b275cefa5c6d38ba959be6f | server_digest=sha256:e6f1df4c4549049f373e1f5b7fc8048f6ee29110b746a3f3fd7374ab7dddad9a\n- test_regression_invoice_renders_every_required_line | tests/test_invoice.py:16-23 | score=0.0000 | sddctx:v1:test_case:tests/test_invoice.py::test_regression_invoice_renders_every_required_line:b5ed3decd1c2 | db_position=22 | file_sha256=a20cf37f4cbf860f1f782b4c6e3e22b4b6163fa38b275cefa5c6d38ba959be6f | server_digest=sha256:03413f040761260f5a16bca81c5556430b44d21676e4dfe77605ec91e5e1e35f\n- test_regression_money_addition_and_subtraction | tests/test_money.py:27-29 | score=0.0000 | sddctx:v1:test_case:tests/test_money.py::test_regression_money_addition_and_subtraction:c15ca5441635 | db_position=28 | file_sha256=cc4d512668e2ef06c293030a1c53541aad90852e18198c63e6b8047bd82be8ff | server_digest=sha256:e8656e4dcf2947096ef688bd8f4f95044d331bc500cdac052180e15a9abb1db6\n- test_regression_money_rejects_non_decimal_amount | tests/test_money.py:17-19 | score=0.0000 | sddctx:v1:test_case:tests/test_money.py::test_regression_money_rejects_non_decimal_amount:0f6ee07d97bd | db_position=26 | file_sha256=cc4d512668e2ef06c293030a1c53541aad90852e18198c63e6b8047bd82be8ff | server_digest=sha256:bd63638fe35629424dfe4d5120cfca1a1e75d96231d3c4930a619eb1bf91f698\n- test_regression_money_rejects_non_finite_amount | tests/test_money.py:22-24 | score=0.0000 | sddctx:v1:test_case:tests/test_money.py::test_regression_money_rejects_non_finite_amount:f3eeb1b21be8 | db_position=27 | file_sha256=cc4d512668e2ef06c293030a1c53541aad90852e18198c63e6b8047bd82be8ff | server_digest=sha256:8504e0a11ea6cf54972f8b749353c7e48965830ba438f35be8fb5c095388a0cf\n- test_regression_money_rejects_non_integer_scaling | tests/test_money.py:36-38 | score=0.0000 | sddctx:v1:test_case:tests/test_money.py::test_regression_money_rejects_non_integer_scaling:a34706f8994f | db_position=30 | file_sha256=cc4d512668e2ef06c293030a1c53541aad90852e18198c63e6b8047bd82be8ff | server_digest=sha256:ebc759cababe98848e08fbae82cf911143d8586cf3940c5465000e76fe467d78\n- test_regression_money_rounds_to_cents_with_half_up | tests/test_money.py:12-14 | score=0.0000 | sddctx:v1:test_case:tests/test_money.py::test_regression_money_rounds_to_cents_with_half_up:214b052af1a5 | db_position=25 | file_sha256=cc4d512668e2ef06c293030a1c53541aad90852e18198c63e6b8047bd82be8ff | server_digest=sha256:bec67acfa49a051db5bad48f95f556d060c6681e26edeb94c993db3b5cccae07\n- test_regression_money_scaled_keeps_full_precision_until_quantize | tests/test_money.py:41-42 | score=0.0000 | sddctx:v1:test_case:tests/test_money.py::test_regression_money_scaled_keeps_full_precision_until_quantize:1f1e19a3ff3d | db_position=31 | file_sha256=cc4d512668e2ef06c293030a1c53541aad90852e18198c63e6b8047bd82be8ff | server_digest=sha256:6c00385fb2e5e89e0884592bf6f6c36ea1d6a657740a179b558d03149a6b704f\n- test_regression_money_scales_by_integer_quantity | tests/test_money.py:32-33 | score=0.0000 | sddctx:v1:test_case:tests/test_money.py::test_regression_money_scales_by_integer_quantity:9573ae6e7365 | db_position=29 | file_sha256=cc4d512668e2ef06c293030a1c53541aad90852e18198c63e6b8047bd82be8ff | server_digest=sha256:6f486f8a3e85b71081e6d6034afa37703c46bbe39e6b18fb70010ffb38aae316\n- test_regression_money_zero_and_string_form | tests/test_money.py:45-47 | score=0.0000 | sddctx:v1:test_case:tests/test_money.py::test_regression_money_zero_and_string_form:ff2b1c5033c5 | db_position=32 | file_sha256=cc4d512668e2ef06c293030a1c53541aad90852e18198c63e6b8047bd82be8ff | server_digest=sha256:544266080725f7223bb2017a62ba466e7cd844e68e4404ab30bd9b8bfd8fe109\n- test_regression_empty_order_has_zero_subtotal | tests/test_pricing.py:38-39 | score=0.0000 | sddctx:v1:test_case:tests/test_pricing.py::test_regression_empty_order_has_zero_subtotal:006441ae018c | db_position=34 | file_sha256=c1aa6617008353759f86de1f6aa6469846061729f8a4dae3000e5b3dd65d24d9 | server_digest=sha256:f303e5617ff498fe8a03b3194f4c4a5d0f16ee7ffa9f8005cb547db1fd01e950\n- test_regression_line_item_requires_a_sku | tests/test_pricing.py:78-80 | score=0.0000 | sddctx:v1:test_case:tests/test_pricing.py::test_regression_line_item_requires_a_sku:58a61a369d0d | db_position=41 | file_sha256=c1aa6617008353759f86de1f6aa6469846061729f8a4dae3000e5b3dd65d24d9 | server_digest=sha256:ecedf62c304e987c9293ee15ff55df60f4e7e209364def34121f0195fa99d4d1\n- test_regression_negative_tax_rate_is_rejected | tests/test_pricing.py:68-70 | score=0.0000 | sddctx:v1:test_case:tests/test_pricing.py::test_regression_negative_tax_rate_is_rejected:13f862bbc28a | db_position=39 | file_sha256=c1aa6617008353759f86de1f6aa6469846061729f8a4dae3000e5b3dd65d24d9 | server_digest=sha256:95ef152eb71094d1e1f247dfe6bd94da70f69de597c201320c512023099ab728\n- test_regression_non_decimal_tax_rate_is_rejected | tests/test_pricing.py:63-65 | score=0.0000 | sddctx:v1:test_case:tests/test_pricing.py::test_regression_non_decimal_tax_rate_is_rejected:c245b5fed30b | db_position=38 | file_sha256=c1aa6617008353759f86de1f6aa6469846061729f8a4dae3000e5b3dd65d24d9 | server_digest=sha256:e3a2a0a5380269a6dcc80ddf2c927bf4d04ee2eb91970b7fa520aebf61e5ff94\n- test_regression_non_positive_quantity_is_rejected | tests/test_pricing.py:73-75 | score=0.0000 | sddctx:v1:test_case:tests/test_pricing.py::test_regression_non_positive_quantity_is_rejected:e8228640fef7 | db_position=40 | file_sha256=c1aa6617008353759f86de1f6aa6469846061729f8a4dae3000e5b3dd65d24d9 | server_digest=sha256:d9e64aa34d6b370fd55c2ca9ba6473eee7660998541e481520f36d25ca3e9531\n- test_regression_subtotal_is_the_sum_of_line_totals | tests/test_pricing.py:33-35 | score=0.0000 | sddctx:v1:test_case:tests/test_pricing.py::test_regression_subtotal_is_the_sum_of_line_totals:d7e69e4c460c | db_position=33 | file_sha256=c1aa6617008353759f86de1f6aa6469846061729f8a4dae3000e5b3dd65d24d9 | server_digest=sha256:f9742381d1ff8b3843b4e3aaf8d2d4896e978299308839d5d67adf24833ee683\n- test_regression_tax_is_computed_on_the_subtotal | tests/test_pricing.py:42-47 | score=0.0000 | sddctx:v1:test_case:tests/test_pricing.py::test_regression_tax_is_computed_on_the_subtotal:c85c279d3dc1 | db_position=35 | file_sha256=c1aa6617008353759f86de1f6aa6469846061729f8a4dae3000e5b3dd65d24d9 | server_digest=sha256:6204822b4227bb11edd40fb2e34906b5f288ed202dbd553e10a3d32e1e52a60a\n- test_regression_tax_uses_round_half_up_not_bankers_rounding | tests/test_pricing.py:57-60 | score=0.0000 | sddctx:v1:test_case:tests/test_pricing.py::test_regression_tax_uses_round_half_up_not_bankers_rounding:cccca3da1ec1 | db_position=37 | file_sha256=c1aa6617008353759f86de1f6aa6469846061729f8a4dae3000e5b3dd65d24d9 | server_digest=sha256:455a60a2854698752e19b63fdccf72f7eaedd7a92cf5a0603e0c30be30c85295\n- test_regression_total_equals_subtotal_plus_tax | tests/test_pricing.py:50-54 | score=0.0000 | sddctx:v1:test_case:tests/test_pricing.py::test_regression_total_equals_subtotal_plus_tax:9d79f7464dea | db_position=36 | file_sha256=c1aa6617008353759f86de1f6aa6469846061729f8a4dae3000e5b3dd65d24d9 | server_digest=sha256:ddd2f27f074a2f1dcfe074d558b83070da8054677d3e31709d840b6bc3a73149",
+  "steps": [
+    {
+      "step": "ingest-and-query-before-edit",
+      "command": "python -m sddctx ingest --project D:\\.hyper\\project\\OceanBase\\PowerContext-minimax\\minimax\\sample && python -m sddctx query --task '实现发票促销码折扣并保持金额不变量'",
+      "exit_code": 0,
+      "detail": {
+        "scope_id": "scp_0gwh7r7fn7gcwzwnewendrm5kp",
+        "record_count": 47,
+        "spec_sections": 12,
+        "files_to_modify": [
+          "src/billing/pricing.py"
+        ]
+      },
+      "timestamp": "2026-10-28T13:22:09.788979+00:00"
+    },
+    {
+      "step": "edit-specification",
+      "command": "patch minimax/sample/specs/SPEC-BILL-001-invoice-promo-discount.md",
+      "exit_code": 0,
+      "detail": {
+        "sha256_before": "d501c0167c7e418d141403b0f20dfd735ba9d684988bca29eee7ff9ab5c7d260",
+        "sha256_after": "d7f110809ec75d0c90402e56a1bc7b43ed470abd767061c01a23ed31440ce02f",
+        "diff": "--- a/minimax/sample/specs/SPEC-BILL-001-invoice-promo-discount.md\n+++ b/minimax/sample/specs/SPEC-BILL-001-invoice-promo-discount.md\n@@ -2,7 +2,7 @@\n spec_id: SPEC-BILL-001\n title: 发票促销码折扣 (Invoice promotion-code discount)\n status: approved\n-version: 1\n+version: 2\n applies_to:\n   - symbol:billing.pricing.compute_invoice_totals\n   - symbol:billing.pricing.InvoiceTotals\n@@ -50,8 +50,9 @@\n | 促销码 | percent_off | max_discount | expires_on |\n | --- | --- | --- | --- |\n | `SAVE10` | 10 | 50.00 | 无 |\n-| `SAVE20` | 20 | 100.00 | 无 |\n+| `SAVE20` | 20 | 150.00 | 无 |\n | `OLD15` | 15 | 30.00 | 2020-06-30（已过期） |\n+| `SAVE30` | 30 | 200.00 | 无 |\n \n ## 折扣计算规则 (Discount rules)\n \n@@ -87,6 +88,7 @@\n | --- | --- | --- | --- | --- |\n | 无促销码 | 100.00 | 0.00 | 10.00 | 110.00 |\n | `SAVE10` | 100.00 | 10.00 | 9.00 | 99.00 |\n+| `SAVE30` | 100.00 | 30.00 | 7.00 | 77.00 |\n \n 小计 `1000.00`，税率 `10%`，促销码 `SAVE10`（上限 50.00）：\n \n"
+      },
+      "timestamp": "2026-10-28T13:22:09.790025+00:00"
+    },
+    {
+      "step": "reimport-and-query-after-edit",
+      "command": "python -m sddctx ingest --project D:\\.hyper\\project\\OceanBase\\PowerContext-minimax\\minimax\\sample && python -m sddctx query --task '实现发票促销码折扣并保持金额不变量'",
+      "exit_code": 0,
+      "detail": {
+        "record_count": 47,
+        "spec_sections": 12,
+        "files_to_modify": [
+          "src/billing/pricing.py"
+        ]
+      },
+      "timestamp": "2026-10-28T13:22:12.140350+00:00"
+    },
+    {
+      "step": "restore-specification",
+      "command": "restore minimax/sample/specs/SPEC-BILL-001-invoice-promo-discount.md",
+      "exit_code": 0,
+      "detail": {
+        "sha256_before_edit": "d501c0167c7e418d141403b0f20dfd735ba9d684988bca29eee7ff9ab5c7d260",
+        "sha256_after_restore": "d501c0167c7e418d141403b0f20dfd735ba9d684988bca29eee7ff9ab5c7d260"
+      },
+      "timestamp": "2026-10-28T13:22:12.292291+00:00"
+    }
+  ]
+}

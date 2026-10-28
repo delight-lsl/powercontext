@@ -1,0 +1,16 @@
+# Local runtime artifacts for the minimax SDD solution.
+# These are machine-specific and must never be committed.
+
+.runtime/
+.venv/
+
+# The repository root ignores every directory named "env"; this one holds the
+# configuration template with placeholder values, so it is re-included here.
+!env/
+!env/*.env.example
+
+*.env
+__pycache__/
+*.pyc
+.pytest_cache/
+artifacts/tmp/

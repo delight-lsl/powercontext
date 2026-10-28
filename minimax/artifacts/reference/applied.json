@@ -1,0 +1,7 @@
+{
+  "generated_at": "2026-10-28T13:21:38.088828+00:00",
+  "code_source": "reference",
+  "source_file": "reference/pricing_promo.py",
+  "target_file": "sample/src/billing/pricing.py",
+  "reason": "the MiniMax endpoint was unreachable during this run"
+}

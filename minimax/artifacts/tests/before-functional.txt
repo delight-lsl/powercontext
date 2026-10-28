@@ -1,0 +1,76 @@
+$ D:\.hyper\project\OceanBase\PowerContext-minimax\minimax\.venv\Scripts\python.exe -m pytest -v -k promo
+
+--- stdout ---
+============================= test session starts =============================
+platform win32 -- Python 3.12.14, pytest-9.2.0, pluggy-1.7.0
+rootdir: D:\.hyper\project\OceanBase\PowerContext-minimax\minimax\sample
+configfile: pytest.ini (WARNING: ignoring pytest config in pyproject.toml!)
+testpaths: tests
+plugins: anyio-4.15.1, platformdirs-4.13.7
+collected 26 items / 20 deselected / 6 selected
+
+tests\test_pricing.py FFFFFF                                             [100%]
+
+================================== FAILURES ===================================
+__________ test_promo_code_applies_a_percentage_discount_before_tax ___________
+
+    def test_promo_code_applies_a_percentage_discount_before_tax():
+>       totals = pricing.compute_invoice_totals(
+            [_item()], tax_rate=Decimal("0.1"), promo_code="SAVE10"
+        )
+E       TypeError: compute_invoice_totals() got an unexpected keyword argument 'promo_code'
+
+tests\test_pricing.py:89: TypeError
+____________ test_promo_discount_is_capped_by_the_maximum_discount ____________
+
+    def test_promo_discount_is_capped_by_the_maximum_discount():
+>       totals = pricing.compute_invoice_totals(
+            [_item(unit_price="1000.00")], tax_rate=Decimal("0.1"), promo_code="SAVE10"
+        )
+E       TypeError: compute_invoice_totals() got an unexpected keyword argument 'promo_code'
+
+tests\test_pricing.py:99: TypeError
+_____________ test_promo_without_code_keeps_the_discount_at_zero ______________
+
+    def test_promo_without_code_keeps_the_discount_at_zero():
+>       totals = pricing.compute_invoice_totals(
+            [_item()], tax_rate=Decimal("0.1"), promo_code=None
+        )
+E       TypeError: compute_invoice_totals() got an unexpected keyword argument 'promo_code'
+
+tests\test_pricing.py:108: TypeError
+_____________________ test_unknown_promo_code_is_rejected _____________________
+
+    def test_unknown_promo_code_is_rejected():
+>       with pytest.raises(pricing.UnknownPromoError):
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'billing.pricing' has no attribute 'UnknownPromoError'
+
+tests\test_pricing.py:116: AttributeError
+_____________________ test_expired_promo_code_is_rejected _____________________
+
+    def test_expired_promo_code_is_rejected():
+>       with pytest.raises(pricing.ExpiredPromoError):
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'billing.pricing' has no attribute 'ExpiredPromoError'
+
+tests\test_pricing.py:121: AttributeError
+____________________ test_promo_errors_are_pricing_errors _____________________
+
+    def test_promo_errors_are_pricing_errors():
+>       assert issubclass(pricing.UnknownPromoError, pricing.PricingError)
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'billing.pricing' has no attribute 'UnknownPromoError'
+
+tests\test_pricing.py:126: AttributeError
+=========================== short test summary info ===========================
+FAILED tests/test_pricing.py::test_promo_code_applies_a_percentage_discount_before_tax
+FAILED tests/test_pricing.py::test_promo_discount_is_capped_by_the_maximum_discount
+FAILED tests/test_pricing.py::test_promo_without_code_keeps_the_discount_at_zero
+FAILED tests/test_pricing.py::test_unknown_promo_code_is_rejected - Attribute...
+FAILED tests/test_pricing.py::test_expired_promo_code_is_rejected - Attribute...
+FAILED tests/test_pricing.py::test_promo_errors_are_pricing_errors - Attribut...
+====================== 6 failed, 20 deselected in 0.13s =======================
+
+--- stderr ---
+
