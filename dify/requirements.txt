@@ -1,0 +1,5 @@
+# Dify × OceanBase: 记仇的赛博酒保 NPC (Cyber Bartender)
+fastapi>=0.100.0
+uvicorn>=0.20.0
+requests>=2.28.0
+pydantic>=2.0.0
