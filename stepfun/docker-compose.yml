@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  seekdb:
+    image: oceanbase/seekdb:latest
+    container_name: seekdb-instance
+    ports:
+      - "2881:2881"
+      - "2886:2886"
+    environment:
+      - ROOT_PASSWORD=
+      - MEMORY_LIMIT=2G
+    volumes:
+      - seekdb_data:/var/lib/oceanbase
+    restart: unless-stopped
+
+volumes:
+  seekdb_data:
