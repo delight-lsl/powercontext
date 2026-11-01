@@ -47,6 +47,7 @@ else:
     from multiprocessing.popen_spawn_posix import Popen as SpawnPopen
 
 from powercontext._logging import log_safely
+from powercontext.builtin.persistence.cursors import SourceCursorRepository
 from powercontext.builtin.persistence.database import AsyncDatabase
 from powercontext.builtin.persistence.errors import ArtifactProcessingLeadershipLostError
 from powercontext.builtin.persistence.processing_intents import ArtifactProcessingIntentRepository
@@ -57,7 +58,11 @@ from powercontext.builtin.persistence.supervision import (
     ArtifactProcessingLeaseRepository,
     database_utc_now,
 )
-from powercontext.builtin.persistence.tables import ARTIFACT_PROCESSING_INTENTS_TABLE, ARTIFACT_PROCESSING_LEASES_TABLE
+from powercontext.builtin.persistence.tables import (
+    ARTIFACT_PROCESSING_INTENTS_TABLE,
+    ARTIFACT_PROCESSING_LEASES_TABLE,
+    SOURCES_TABLE,
+)
 from powercontext.builtin.runtime.processing_contracts import (
     ArtifactProcessingWorkAssignment,
     ArtifactProcessingWorkerCompletion,
@@ -117,6 +122,7 @@ class ArtifactProcessingBinding:
     # Only automatic admission is filtered; already accepted requests retain
     # their own Worker authorization and domain completion semantics.
     automatic_scope_filter: Callable[[AsyncConnection, tuple[str, ...]], Awaitable[frozenset[str]]] | None = None
+    source_count_threshold: int | None = None
 
     def __post_init__(self) -> None:
         if not self.binding_name or self.binding_name != self.binding_name.strip():
@@ -131,13 +137,27 @@ class ArtifactProcessingBinding:
             raise ValueError("max_workers must be a positive integer")  # noqa: TRY003
         if self.worker_timeout_seconds <= 0:
             raise ValueError("worker_timeout_seconds must be positive")  # noqa: TRY003
-        if self.automatic_processing_interval is not None:
-            if self.automatic_processing_interval.total_seconds() <= 0:
-                raise ValueError("automatic interval must be positive")  # noqa: TRY003
-            if self.cron is not None:
-                raise ValueError("interval and cron cannot both be enabled")  # noqa: TRY003
-        if self.cron is not None:
-            CronTrigger.from_crontab(self.cron, timezone=ZoneInfo(self.timezone))
+        _validate_binding_schedule(self.automatic_processing_interval, self.cron, self.timezone)
+        _validate_count_threshold(self.source_count_threshold)
+
+
+def _validate_binding_schedule(
+    interval: timedelta | None,
+    cron: str | None,
+    timezone: str,
+) -> None:
+    if interval is not None:
+        if interval.total_seconds() <= 0:
+            raise ValueError("automatic interval must be positive")  # noqa: TRY003
+        if cron is not None:
+            raise ValueError("interval and cron cannot both be enabled")  # noqa: TRY003
+    if cron is not None:
+        CronTrigger.from_crontab(cron, timezone=ZoneInfo(timezone))
+
+
+def _validate_count_threshold(threshold: int | None) -> None:
+    if threshold is not None and (type(threshold) is not int or threshold < 1):
+        raise ValueError("source_count_threshold must be a positive integer")  # noqa: TRY003
 
 
 class _WorkerResultSender(Protocol):
@@ -448,6 +468,7 @@ class ArtifactProcessingSupervisor:
         self._intents = intents or ArtifactProcessingIntentRepository()
         self._leases = leases or ArtifactProcessingLeaseRepository()
         self._binding_states = binding_states or ArtifactProcessingBindingStateRepository()
+        self._cursors = SourceCursorRepository()
         self.holder_id = holder_id or str(uuid4())
         self._tick = oceanbase_tick_seconds
         self._lease_seconds = oceanbase_lease_seconds
@@ -652,10 +673,67 @@ class ArtifactProcessingSupervisor:
         state.automatic_next = not state.automatic_next
         if state.automatic_next:
             await self._discover_automatic(state)
+            await self._discover_count(state)
             await self._discover_requested(state)
         else:
             await self._discover_requested(state)
+            await self._discover_count(state)
             await self._discover_automatic(state)
+
+    async def _discover_count(self, state: _FamilyState) -> None:
+        binding = state.binding
+        if binding.source_count_threshold is None:
+            return
+        capacity = self._fresh_capacity(state)
+        if capacity <= 0:
+            return
+        admitted: list[str] = []
+        async with self._database.transaction() as connection:
+            await self._leases.require_fence(connection, self._require_current_fence())
+            table = ARTIFACT_PROCESSING_INTENTS_TABLE
+            rows = (
+                await connection.execute(
+                    select(table.c.scope_id)
+                    .where(
+                        table.c.binding_name == binding.binding_name,
+                        table.c.dirty_generation > table.c.clean_generation,
+                        table.c.requested_generation == table.c.handled_generation,
+                    )
+                    .order_by(table.c.pending_sequence)
+                    .limit(_DISCOVERY_PAGE_SIZE)
+                )
+            ).mappings()
+            candidates = [
+                str(row["scope_id"])
+                for row in rows
+                if str(row["scope_id"]) not in state.queued
+                and str(row["scope_id"]) not in state.running
+                and str(row["scope_id"]) not in state.retries
+            ]
+            if candidates and binding.automatic_scope_filter is not None:
+                eligible = await binding.automatic_scope_filter(connection, tuple(candidates))
+                candidates = [s for s in candidates if s in eligible]
+            for scope_id in candidates:
+                if len(admitted) >= capacity:
+                    state.next_discovery_at = asyncio.get_running_loop().time() + _DISCOVERY_PAGE_DELAY_SECONDS
+                    self.wake(state.binding.binding_name)
+                    break
+                cursor_record = await self._cursors.load(connection, scope_id, binding.binding_name)
+                cursor_seq = 0 if cursor_record is None else cursor_record.cursor.sequence
+                count_statement = (
+                    select(func.count())
+                    .select_from(SOURCES_TABLE)
+                    .where(
+                        SOURCES_TABLE.c.scope_id == scope_id,
+                        SOURCES_TABLE.c.journal_position > cursor_seq,
+                    )
+                )
+                pending_count = int(await connection.scalar(count_statement) or 0)
+                if pending_count >= binding.source_count_threshold:
+                    await self._intents.request(connection, scope_id, binding.binding_name)
+                    admitted.append(scope_id)
+        for scope_id in admitted:
+            self._enqueue(state, scope_id)
 
     async def _discover_requested(self, state: _FamilyState) -> None:
         capacity = self._fresh_capacity(state)

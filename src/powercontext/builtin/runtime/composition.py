@@ -771,6 +771,11 @@ def _artifact_processing_bindings(  # noqa: C901 - validate and assemble one reg
             entrypoint = partial(run_family_worker, FamilyWorkerSpec(config=config, worker_security=worker_security))
         interval = None if family == "profile" else automatic[family]
         binding = canonical[family]
+        count_threshold = None
+        if family == "memory":
+            count_threshold = config.runtime.memory_source_count_threshold
+        elif family == "topic-memory":
+            count_threshold = config.runtime.topic_memory_source_count_threshold
         configured.append(
             ArtifactProcessingBinding(
                 binding_name=binding,
@@ -787,6 +792,7 @@ def _artifact_processing_bindings(  # noqa: C901 - validate and assemble one reg
                 if family == "skill"
                 else SourceProcessingPendingProvider(contexts.database, binding, family),
                 automatic_scope_filter=enabled_profile_scopes if family == "profile" else None,
+                source_count_threshold=count_threshold,
             )
         )
     _validate_processing_registrations(configured)
@@ -939,6 +945,7 @@ async def open_builtin_contexts(
                     min_tombstone_revisions=config.runtime.memory_compaction_min_tombstone_revisions,
                 ),
                 memory_max_history_revisions=config.runtime.memory_max_history_revisions,
+                memory_source_count_threshold=config.runtime.memory_source_count_threshold,
                 prompt_registry=prompt_registry,
                 prompt_demonstrators=prompt_demonstrators,
                 handoff_verification_keys=handoff_verification_keys,
@@ -1016,6 +1023,7 @@ async def open_builtin_contexts(
                 min_tombstone_revisions=config.runtime.memory_compaction_min_tombstone_revisions,
             ),
             memory_max_history_revisions=config.runtime.memory_max_history_revisions,
+            memory_source_count_threshold=config.runtime.memory_source_count_threshold,
             prompt_registry=prompt_registry,
             prompt_demonstrators=prompt_demonstrators,
             handoff_verification_keys=handoff_verification_keys,

@@ -135,6 +135,17 @@ class RuntimeConfig(BaseModel):
             raise ValueError("Worker quota must be a positive integer")  # noqa: TRY003, TRY004 - Pydantic validation
         return value
 
+    @field_validator(
+        "memory_source_count_threshold",
+        "topic_memory_source_count_threshold",
+        mode="before",
+    )
+    @classmethod
+    def reject_invalid_source_count_threshold(cls, value: Any) -> Any:
+        if value is not None and (type(value) is not int or value < 1):
+            raise ValueError("source count threshold must be a strictly positive integer")  # noqa: TRY003
+        return value
+
     scope_cache_size: int = Field(default=DEFAULT_SCOPE_CACHE_SIZE, ge=1)
     source_window_limit: int = Field(default=100, ge=1)
     context_assembly_max_entries: int = Field(default=8, ge=1)
@@ -199,6 +210,8 @@ class RuntimeConfig(BaseModel):
             raise ValueError(_RECALL_GATE_ROUND2_ORDER_ERROR)
         return self
 
+    memory_source_count_threshold: int | None = None
+    topic_memory_source_count_threshold: int | None = None
     schedule_seconds: float | None = Field(default=None, gt=0)
     memory_schedule_seconds: float | None = Field(default=None, gt=0)
     experience_schedule_seconds: float | None = Field(default=None, gt=0)

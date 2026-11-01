@@ -33,7 +33,7 @@ from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
 from jsonschema.protocols import Validator
 from referencing import Registry
 from referencing.exceptions import Unresolvable
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from powercontext.artifacts import Artifact, ArtifactRef, MemoryCitation
@@ -158,7 +158,7 @@ from powercontext.builtin.persistence.supervision import (
     ArtifactProcessingBindingStateRepository,
     ArtifactProcessingLeaseRepository,
 )
-from powercontext.builtin.persistence.tables import ARTIFACT_HEADS_TABLE, SOURCE_JOURNAL_HEADS_TABLE
+from powercontext.builtin.persistence.tables import ARTIFACT_HEADS_TABLE, SOURCE_JOURNAL_HEADS_TABLE, SOURCES_TABLE
 from powercontext.builtin.persistence.topic_memory import TopicMemoryRepository
 from powercontext.builtin.persistence.topic_memory_index import NoTopicMemoryIndex, TopicMemoryIndex
 from powercontext.builtin.persistence.topic_memory_management import TopicMemoryManagementWriter
@@ -317,6 +317,7 @@ class _ScopedServices:
     prompts: PromptService
     generation_receipts: HandoffGenerationReceipts
     model_usage: _ModelUsageRecorder
+    memory_source_count_threshold: int | None = None
 
     def generation_sources(self) -> GenerationSourceAccess:
         return GenerationSourceAccess(self.repositories.sources)
@@ -547,6 +548,7 @@ class RelationalContexts:
         model_usage_queue_capacity: int = 256,
         model_usage_write_timeout_seconds: float = 1.0,
         model_usage_flush_timeout_seconds: float = 0.5,
+        memory_source_count_threshold: int | None = None,
     ) -> None:
         self.database = database
         self.scopes = ScopeApplication(database, cursor_secret=cursor_secret)
@@ -700,6 +702,7 @@ class RelationalContexts:
         )
         self._memory_compaction = MemoryCompactionPolicy() if memory_compaction is None else memory_compaction
         self._memory_max_history_revisions = memory_max_history_revisions
+        self._memory_source_count_threshold = memory_source_count_threshold
         self._handoff_artifact_id = handoff_artifact_id
         self._memory_artifact_id = memory_artifact_id
         self._tracing = tracing
@@ -1451,6 +1454,7 @@ class RelationalContexts:
             token_estimator=self._token_estimator,
             source_registry=self.source_registry,
             model_usage=self._model_usage,
+            memory_source_count_threshold=self._memory_source_count_threshold,
         )
 
 
@@ -1749,7 +1753,22 @@ class _RelationalTriggers:
                         before = prepared.result if prepared.commit is None else prepared.commit.base
                         await on_commit(connection, before, updated)
                     if processing is not None:
-                        await processing.complete(connection, remaining_work=action.through < high_watermark)
+                        remaining_count = int(
+                            await connection.scalar(
+                                select(func.count())
+                                .select_from(SOURCES_TABLE)
+                                .where(
+                                    SOURCES_TABLE.c.scope_id == self._services.scope_id,
+                                    SOURCES_TABLE.c.journal_position > action.through,
+                                )
+                            )
+                            or 0
+                        )
+                        if self._services.memory_source_count_threshold is not None:
+                            remaining_work = remaining_count >= self._services.memory_source_count_threshold
+                        else:
+                            remaining_work = remaining_count > 0
+                        await processing.complete(connection, remaining_work=remaining_work)
             return MemoryFlushResult(
                 previous_cursor=action.after,
                 high_watermark=high_watermark,
