@@ -17,9 +17,11 @@
 
 ## 部署
 
-目标环境为 Linux x86_64、Docker Engine 20.10+、Docker Compose v2，以及仅用于初始化数据库的 MySQL 5.7 兼容命令行客户端。以下命令均从本项目 `dify` 目录执行。若服务器上已经有 seekdb，可复用现有实例；不要启动 Compose 中自带的 `seekdb` profile。
+目标环境为 Linux x86_64、Docker Engine 20.10+、Docker Compose v2，以及 Dify API 镜像内置的 PyMySQL。以下命令均从本项目 `dify` 目录执行。若服务器上已经有 seekdb，可复用现有实例；不要启动 Compose 中自带的 `seekdb` profile。
 
-1. 在 seekdb 管理连接上执行初始化 SQL。先生成强随机密码，并把 `init_seekdb.sql` 中的 `CHANGE_ME` 替换为该密码：
+Dify 1.18.0 的迁移 `9b7c6d5e4f3a -> 5578e028b2f2` 使用 seekdb 尚不支持的 MySQL 临时表 CTAS。`compat/seekdb_empty_model_migration.py` 仅在 revision 精确匹配且迁移涉及的五张模型配置表都为空时，将该纯数据迁移标记为完成；任一表非空或 revision 不符都会拒绝修改。它不会跳过包含数据的迁移，也不修改应用、会话或消息表。
+
+1. 在 seekdb 管理连接上执行初始化 SQL。先生成强随机密码，并把 `init_seekdb.sql` 中的 `CHANGE_ME` 替换为该密码。Dify 1.18 的插件守护进程要求非空数据库密码，因此不要使用无密码的 `root` 账号：
 
    ```bash
    openssl rand -hex 24
@@ -27,7 +29,7 @@
    mysql -h 127.0.0.1 -P 10100 -uroot < init_seekdb.sql
    ```
 
-2. 配置 Dify。复制 `seekdb.env.example` 为 `deploy/docker/.env`，将 `<SERVER_IP>` 改为评审可访问的服务器地址；为每种 `CHANGE_ME_...` 生成独立随机值。`CHANGE_ME_SEEKDB_PASSWORD` 必须与第 1 步 SQL 中的密码相同，`CHANGE_ME_SANDBOX_KEY` 的两处也必须相同。`DB_HOST` 和 `OCEANBASE_VECTOR_HOST` 使用 Docker 宿主机网关；本样例 Linux Docker 网桥地址为 `172.17.0.1`，如环境不同，用 `ip route` 和容器连通性检查替换。
+2. 配置 Dify。复制 `seekdb.env.example` 为 `deploy/docker/.env`，将 `<SERVER_IP>` 改为评审可访问的服务器地址；为每种 `CHANGE_ME_...` 生成独立随机值。`CHANGE_ME_SEEKDB_PASSWORD` 必须与第 1 步 SQL 中的密码相同，`CHANGE_ME_SANDBOX_KEY` 的两处也必须相同。`DIFY_AGENT_LOCAL_SANDBOX_AUTH_TOKEN` 是 shellctl 本地沙箱的独立随机 token，不要留空或复用数据库密码。`DB_HOST` 和 `OCEANBASE_VECTOR_HOST` 使用 Docker 宿主机网关；本样例 Linux Docker 网桥地址为 `172.17.0.1`，如环境不同，用 `ip route` 和容器连通性检查替换。
 
 3. 从 Dify 部署目录启动：
 
@@ -35,10 +37,12 @@
    cd deploy/docker
    docker compose config --quiet
    docker compose up -d
+   docker compose exec -T api python - < ../../compat/seekdb_empty_model_migration.py
+   docker compose restart api worker worker_beat api_websocket
    docker compose ps
    ```
 
-   首次启动会执行 Dify 数据库迁移。入口为 `http://<SERVER_IP>:18080`。首次打开页面创建管理员账号。
+   首次启动会执行 Dify 数据库迁移。兼容脚本输出五张表的行数和 `empty_data_migration_marked_applied=5578e028b2f2` 后，重启服务以继续迁移。若脚本拒绝执行，不要手工推进 revision；保留数据并使用支持该迁移的 Dify/seekdb 版本或适配实现。入口为 `http://<SERVER_IP>:18080`。首次打开页面创建管理员账号。
 
 4. 在 Dify 工作区设置模型供应商及 API Key，确认模型名与 DSL 中的 `gpt-4o-mini` 一致。也可在导入 DSL 后把节点模型改为工作区已配置的兼容模型。
 
@@ -75,7 +79,36 @@ ORDER BY created_at DESC
 LIMIT 5;
 ```
 
-应能看到 Dify 创建的业务表、会话记录及样例对话消息。跨次打开同一会话后仍能读取先前内容，验证了 seekdb 不只是已安装或可连接，而是实际承担 Dify 持久化职责。向量存储虽已配置，本作品没有知识库检索节点，因此不把它列为本作品的交互证据。
+真实 Chatflow 对话后应能看到 Dify 的会话和消息记录。跨次打开同一会话后仍能读取先前内容，验证 seekdb 实际承担 Dify 持久化职责。向量存储虽已配置，本作品没有知识库检索节点，因此不把它列为交互证据。
+
+## 可运行主链路 Mock
+
+`mock/seekdb_chatflow_mock.py` 是不依赖外部模型 API Key 的确定性验收替身，覆盖初次约会、表达边界、主动保存偏好、切换会话后复用偏好、纠正查手机行为五轮。每轮先从 seekdb 读取会话历史与玩家偏好，再写入 user/assistant 消息并回读校验；它只创建 `heartguide_mock_turns` 和 `heartguide_mock_profiles` 两张独立表，不修改 Dify 原生表。
+
+在 `deploy/docker` 下执行：
+
+```bash
+docker compose exec -T api python - < ../../mock/seekdb_chatflow_mock.py
+```
+
+成功时输出 5 条 `mock_turn` 和最后一条 `mock_passed`。每次执行自动生成独立 run ID；如需人工指定，设置 `HEARTGUIDE_MOCK_RUN_ID` 为未使用过的值。用以下 SQL 核对本次 run 的数据，将 `<RUN_ID>` 替换为 `mock_started` 输出值：
+
+```sql
+SELECT conversation_id, turn_no, role, content
+FROM dify.heartguide_mock_turns
+WHERE run_id = '<RUN_ID>'
+ORDER BY conversation_id, turn_no, role;
+
+SELECT player_id, comfort_preference, updated_at
+FROM dify.heartguide_mock_profiles
+WHERE player_id = 'reviewer-<RUN_ID>';
+```
+
+此 mock 用于在无模型服务时复现角色主链路和 seekdb 每轮读写，不等同于 Dify LLM 节点的真实模型调用。正式交互仍由导入的 Dify Chatflow 执行，并使用 Dify 中配置的模型服务；本仓库不提交模型凭据。
+
+## 部署验证记录
+
+`evidence/2026-11-01-runtime.md` 记录了 RTX 服务器上的 Dify 1.18.0 API 健康检查、已导入应用、seekdb 版本与数据计数；`evidence/mock-run.ndjson` 是五轮 mock 的实际读写记录。该次检查时 Dify 中尚未配置模型供应商，原生 `conversations` 和 `messages` 表均为 0。因此证据证明 DSL 已导入且 seekdb mock 读写/跨会话偏好复用通过，但不证明 Dify LLM 对话已运行。评审要体验真实 Chatflow 时，仍需先在 Dify 配置可用模型服务，再按上方样例执行并核验原生会话与消息表。
 
 ## 来源与限制
 
