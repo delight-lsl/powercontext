@@ -1,0 +1,17 @@
+{
+  "timestamp": 1793520785,
+  "task_query": "依据业务新规范 SPEC-004 与 SPEC-005: 1. 为 calculate_final_amount 增加参数合法性校验 (order_amount<=0 抛出 ValueError, discount_rate 越界抛出 ValueError); 2. 增加单笔应付金额 50000.00 元封顶限制以及 0.01 元保底规则; 3. 保持现有 baseline 会员及优惠券规则全部兼容。",
+  "model": "MiniMax-Text-01",
+  "mode": "minimax-deterministic-synthesizer",
+  "prompt_length": 6641,
+  "generated_code_length": 2078,
+  "applicable_specs": [
+    "SPEC-004",
+    "SPEC-001",
+    "SPEC-005",
+    "SPEC-002",
+    "SPEC-003",
+    "SPEC-999"
+  ],
+  "target_file": "business_project/target_code.py"
+}

@@ -1,0 +1,206 @@
+{
+  "sdd-verify-001": {
+    "task_id": "sdd-verify-001",
+    "status": "COMPLETED",
+    "completed_tasks": [
+      "ingest_materials",
+      "retrieve_sdd_context",
+      "minimax_code_generation",
+      "run_validation_tests"
+    ],
+    "pending_tasks": [],
+    "validation_results": {
+      "exit_code": 0,
+      "passed": true,
+      "stdout": "============================= test session starts =============================\nplatform win32 -- Python 3.11.4, pytest-9.2.0, pluggy-1.7.0 -- D:\\pycharm\\python.exe\ncachedir: .pytest_cache\nrootdir: G:\\AAA_code\\powercontext-2026-competition-ecosystem\\powercontext-2026-competition-ecosystem\nplugins: anyio-4.9.0, langsmith-0.4.42\ncollecting ... collected 7 items\n\nminimax/business_project/test_target.py::test_existing_base_discount PASSED [ 14%]\nminimax/business_project/test_target.py::test_existing_vip_discount PASSED [ 28%]\nminimax/business_project/test_target.py::test_existing_coupon_deduction PASSED [ 42%]\nminimax/business_project/test_target.py::test_spec_004_negative_amount_raises_value_error PASSED [ 57%]\nminimax/business_project/test_target.py::test_spec_004_invalid_discount_rate_raises_value_error PASSED [ 71%]\nminimax/business_project/test_target.py::test_spec_005_cap_maximum_amount PASSED [ 85%]\nminimax/business_project/test_target.py::test_spec_005_floor_minimum_amount PASSED [100%]\n\n============================== 7 passed in 0.02s ==============================\n"
+    },
+    "context_snapshot": {
+      "task_query": "依据业务新规范 SPEC-004 与 SPEC-005: 1. 为 calculate_final_amount 增加参数合法性校验 (order_amount<=0 抛出 ValueError, discount_rate 越界抛出 ValueError); 2. 增加单笔应付金额 50000.00 元封顶限制以及 0.01 元保底规则; 3. 保持现有 baseline 会员及优惠券规则全部兼容。",
+      "database_engine": "seekdb-embedded (Local Engine)",
+      "matched_specifications": [
+        {
+          "spec_id": "SPEC-004",
+          "title": "[SPEC-004] 输入校验与异常保护 (Input Validation - Target Spec)",
+          "source_file": "business_project/specs.md",
+          "content": "### [SPEC-004] 输入校验与异常保护 (Input Validation - Target Spec)\n- **描述**:\n  - `order_amount` 必须为正数。若 `order_amount <= 0`，必须显式抛出 `ValueError(\"Order amount must be positive\")`。\n  - `discount_rate` 必须介于 `[0.0, 1.0]` 区间。若 `discount_rate < 0.0` 或 `discount_rate > 1.0`，必须显式抛出 `ValueError(\"Invalid discount rate\")`。",
+          "relevance_score": 39
+        },
+        {
+          "spec_id": "SPEC-001",
+          "title": "[SPEC-001] 基础折扣计算逻辑 (Baseline Discount)",
+          "source_file": "business_project/specs.md",
+          "content": "### [SPEC-001] 基础折扣计算逻辑 (Baseline Discount)\n- **描述**: 系统根据传入的原始订单金额 `order_amount` 与基础折扣率 `discount_rate` 进行折算。\n- **公式**: `base_amount = order_amount * (1.0 - discount_rate)`\n- **精度**: 所有最终计算金额保留 2 位小数四舍五入。",
+          "relevance_score": 38
+        },
+        {
+          "spec_id": "SPEC-005",
+          "title": "[SPEC-005] 交易金额封顶与保底规则 (Transaction Bounds - Target Spec)",
+          "source_file": "business_project/specs.md",
+          "content": "### [SPEC-005] 交易金额封顶与保底规则 (Transaction Bounds - Target Spec)\n- **描述**:\n  - **单笔封顶 (Cap)**: 经所有折扣及立减折算后的应付金额最高不超过 50,000.00 元。若计算值大于 50,000.00 元，应取 50,000.00 元。\n  - **交易保底 (Floor)**: 当订单原始金额为正数时，扣除优惠券后的实付金额最低不能低于 0.01 元（避免产生负数金额或0元结算漏洞）。",
+          "relevance_score": 31
+        },
+        {
+          "spec_id": "SPEC-002",
+          "title": "[SPEC-002] 会员等级权益折让 (Tier Privileges)",
+          "source_file": "business_project/specs.md",
+          "content": "### [SPEC-002] 会员等级权益折让 (Tier Privileges)\n- **描述**: 支持不同会员等级在基础折扣后的阶梯叠加优惠：\n  - `REGULAR`: 无额外优惠（倍率 1.0）。\n  - `VIP`: 享受额外 5% 折扣（乘以 0.95）。\n  - `SVIP`: 享受额外 10% 折扣（乘以 0.90）。",
+          "relevance_score": 22
+        },
+        {
+          "spec_id": "SPEC-003",
+          "title": "[SPEC-003] 优惠券抵扣机制 (Coupon Deduction)",
+          "source_file": "business_project/specs.md",
+          "content": "### [SPEC-003] 优惠券抵扣机制 (Coupon Deduction)\n- **描述**: 支持优惠券代码核销：\n  - 当 `coupon_code == \"SAVE10\"` 时，在会员折让后直接立减 10.00 元。\n  - 未指定或空优惠券代码时不进行立减。",
+          "relevance_score": 22
+        },
+        {
+          "spec_id": "SPEC-999",
+          "title": "[SPEC-999] 动态风控测试规格",
+          "source_file": "business_project/specs.md",
+          "content": "### [SPEC-999] 动态风控测试规格\n- **描述**: 单日风控额度动态设定为 88888 元。",
+          "relevance_score": 2
+        }
+      ],
+      "target_code_files": [
+        {
+          "material_id": "CODE-TARGET-PRICING",
+          "file_path": "business_project/target_code.py",
+          "symbols": [
+            "calculate_final_amount"
+          ],
+          "content": "# Copyright (c) 2026 OceanBase.\n#\n# Licensed under the Apache License, Version 2.0 (the \"License\");\n# you may not use this file except in compliance with the License.\n# You may obtain a copy of the License at\n#\n#     http://www.apache.org/licenses/LICENSE-2.0\n#\n# Unless required by applicable law or agreed to in writing, software\n# distributed under the License is distributed on an \"AS IS\" BASIS,\n# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\n# See the License for the specific language governing permissions and\n# limitations under the License.\n\n\"\"\"Pricing engine calculation implementation (initial snapshot before SDD task).\"\"\"\n\nfrom typing import Optional\n\n\ndef calculate_final_amount(\n    order_amount: float,\n    discount_rate: float,\n    user_tier: str = \"REGULAR\",\n    coupon_code: Optional[str] = None,\n) -> float:\n    \"\"\"Calculate the final payable order amount.\n\n    Initial implementation: supports base discount, user tiers, and coupons.\n    Pending specification: input validation (SPEC-004) and bounds (SPEC-005).\n    \"\"\"\n    amount = order_amount * (1.0 - discount_rate)\n\n    if user_tier == \"VIP\":\n        amount *= 0.95\n    elif user_tier == \"SVIP\":\n        amount *= 0.90\n\n    if coupon_code == \"SAVE10\":\n        amount -= 10.0\n\n    return round(amount, 2)\n"
+        }
+      ],
+      "verification_tests": [
+        {
+          "material_id": "TEST-SUITE-PRICING",
+          "file_path": "business_project/test_target.py",
+          "applicable_tests": [
+            "test_existing_base_discount (Regression)",
+            "test_existing_vip_discount (Regression)",
+            "test_existing_coupon_deduction (Regression)",
+            "test_spec_004_negative_amount_raises_value_error (Target)",
+            "test_spec_004_invalid_discount_rate_raises_value_error (Target)",
+            "test_spec_005_cap_maximum_amount (Target)",
+            "test_spec_005_floor_minimum_amount (Target)"
+          ],
+          "content": "# Copyright (c) 2026 OceanBase.\n#\n# Licensed under the Apache License, Version 2.0 (the \"License\");\n# you may not use this file except in compliance with the License.\n# You may obtain a copy of the License at\n#\n#     http://www.apache.org/licenses/LICENSE-2.0\n#\n# Unless required by applicable law or agreed to in writing, software\n# distributed under the License is distributed on an \"AS IS\" BASIS,\n# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\n# See the License for the specific language governing permissions and\n# limitations under the License.\n\n\"\"\"Test suite for pricing calculation engine.\"\"\"\n\nimport pytest\n\nfrom .target_code import calculate_final_amount\n\n# ==============================================================================\n# 1. 现有基线行为回归测试 (修改前通过，修改后必须保持通过)\n# ==============================================================================\n\n\ndef test_existing_base_discount() -> None:\n    \"\"\"验证 SPEC-001: 基础金额打折计算.\"\"\"\n    result = calculate_final_amount(order_amount=100.0, discount_rate=0.2)\n    assert result == 80.0\n\n\ndef test_existing_vip_discount() -> None:\n    \"\"\"验证 SPEC-002: VIP与SVIP会员额外权益折让.\"\"\"\n    vip_result = calculate_final_amount(\n        order_amount=200.0, discount_rate=0.1, user_tier=\"VIP\"\n    )\n    # 200 * 0.9 * 0.95 = 171.0\n    assert vip_result == 171.0\n\n    svip_result = calculate_final_amount(\n        order_amount=200.0, discount_rate=0.1, user_tier=\"SVIP\"\n    )\n    # 200 * 0.9 * 0.90 = 162.0\n    assert svip_result == 162.0\n\n\ndef test_existing_coupon_deduction() -> None:\n    \"\"\"验证 SPEC-003: SAVE10 优惠券立减10元机制.\"\"\"\n    result = calculate_final_amount(\n        order_amount=100.0, discount_rate=0.0, coupon_code=\"SAVE10\"\n    )\n    assert result == 90.0\n\n\n# ==============================================================================\n# 2. 目标新规格测试项 (修改前因未实现新需求而明确失败，修改后全部通过)\n# ==============================================================================\n\n\ndef test_spec_004_negative_amount_raises_value_error() -> None:\n    \"\"\"验证 SPEC-004: 订单金额非法(<=0)时必须抛出 ValueError.\"\"\"\n    with pytest.raises(ValueError, match=\"Order amount must be positive\"):\n        calculate_final_amount(order_amount=-50.0, discount_rate=0.1)\n\n    with pytest.raises(ValueError, match=\"Order amount must be positive\"):\n        calculate_final_amount(order_amount=0.0, discount_rate=0.1)\n\n\ndef test_spec_004_invalid_discount_rate_raises_value_error() -> None:\n    \"\"\"验证 SPEC-004: 折扣率超出 [0, 1] 时必须抛出 ValueError.\"\"\"\n    with pytest.raises(ValueError, match=\"Invalid discount rate\"):\n        calculate_final_amount(order_amount=100.0, discount_rate=1.5)\n\n    with pytest.raises(ValueError, match=\"Invalid discount rate\"):\n        calculate_final_amount(order_amount=100.0, discount_rate=-0.2)\n\n\ndef test_spec_005_cap_maximum_amount() -> None:\n    \"\"\"验证 SPEC-005: 单笔最终应付金额封顶上限 50000.00 元.\"\"\"\n    # 60000 无折扣计算本应为 60000，受封顶保护应限制为 50000.00\n    result = calculate_final_amount(order_amount=60000.0, discount_rate=0.0)\n    assert result == 50000.0\n\n\ndef test_spec_005_floor_minimum_amount() -> None:\n    \"\"\"验证 SPEC-005: 订单金额为正时，立减抵扣后实付金额保底最低 0.01 元.\"\"\"\n    # 5.0 元使用 SAVE10 优惠券立减10元，不得得出负数或0，应保底为 0.01\n    result = calculate_final_amount(\n        order_amount=5.0, discount_rate=0.0, coupon_code=\"SAVE10\"\n    )\n    assert result == 0.01\n"
+        }
+      ],
+      "source_evidence": [
+        "business_project/specs.md",
+        "business_project/specs.md",
+        "business_project/specs.md",
+        "business_project/specs.md",
+        "business_project/specs.md",
+        "business_project/specs.md",
+        "business_project/target_code.py",
+        "business_project/test_target.py"
+      ]
+    },
+    "code_diff": "--- target_code.py (pre-modification)\n+++ target_code.py (post-modification)\n@@ -12,7 +12,7 @@\n # See the License for the specific language governing permissions and\n # limitations under the License.\n \n-\"\"\"Pricing engine calculation implementation (initial snapshot before SDD task).\"\"\"\n+\"\"\"Pricing engine calculation implementation (updated by MiniMax SDD Agent).\"\"\"\n \n from typing import Optional\n \n@@ -23,19 +23,38 @@\n     user_tier: str = \"REGULAR\",\n     coupon_code: Optional[str] = None,\n ) -> float:\n-    \"\"\"Calculate the final payable order amount.\n+    \"\"\"Calculate the final payable order amount adhering to SDD specifications.\n \n-    Initial implementation: supports base discount, user tiers, and coupons.\n-    Pending specification: input validation (SPEC-004) and bounds (SPEC-005).\n+    Complies with:\n+    - [SPEC-001] Base discount: order_amount * (1.0 - discount_rate)\n+    - [SPEC-002] Tier privileges: VIP (5% off), SVIP (10% off)\n+    - [SPEC-003] Coupon deduction: SAVE10 gives flat 10.0 deduction\n+    - [SPEC-004] Input validation: order_amount > 0 and 0.0 <= discount_rate <= 1.0\n+    - [SPEC-005] Transaction bounds: capped at 50000.00, floored at 0.01\n     \"\"\"\n+    # [SPEC-004] Input validation & bounds checking\n+    if order_amount <= 0:\n+        raise ValueError(\"Order amount must be positive\")\n+    if discount_rate < 0.0 or discount_rate > 1.0:\n+        raise ValueError(\"Invalid discount rate\")\n+\n+    # [SPEC-001] Base discount calculation\n     amount = order_amount * (1.0 - discount_rate)\n \n+    # [SPEC-002] User tier discount\n     if user_tier == \"VIP\":\n         amount *= 0.95\n     elif user_tier == \"SVIP\":\n         amount *= 0.90\n \n+    # [SPEC-003] Coupon deduction\n     if coupon_code == \"SAVE10\":\n         amount -= 10.0\n \n+    # [SPEC-005] Bounds: cap maximum at 50,000.00 and floor minimum at 0.01\n+    if amount > 50000.0:\n+        amount = 50000.0\n+    if amount < 0.01:\n+        amount = 0.01\n+\n     return round(amount, 2)\n",
+    "updated_at": 1793520767
+  },
+  "sdd-task-minimax-001": {
+    "task_id": "sdd-task-minimax-001",
+    "status": "COMPLETED",
+    "completed_tasks": [
+      "ingest_materials",
+      "retrieve_sdd_context",
+      "minimax_code_generation",
+      "run_validation_tests"
+    ],
+    "pending_tasks": [],
+    "validation_results": {
+      "exit_code": 0,
+      "passed": true,
+      "stdout": "============================= test session starts =============================\nplatform win32 -- Python 3.11.4, pytest-9.2.0, pluggy-1.7.0 -- D:\\pycharm\\python.exe\ncachedir: .pytest_cache\nrootdir: G:\\AAA_code\\powercontext-2026-competition-ecosystem\\powercontext-2026-competition-ecosystem\nplugins: anyio-4.9.0, langsmith-0.4.42\ncollecting ... collected 7 items\n\nminimax/business_project/test_target.py::test_existing_base_discount PASSED [ 14%]\nminimax/business_project/test_target.py::test_existing_vip_discount PASSED [ 28%]\nminimax/business_project/test_target.py::test_existing_coupon_deduction PASSED [ 42%]\nminimax/business_project/test_target.py::test_spec_004_negative_amount_raises_value_error PASSED [ 57%]\nminimax/business_project/test_target.py::test_spec_004_invalid_discount_rate_raises_value_error PASSED [ 71%]\nminimax/business_project/test_target.py::test_spec_005_cap_maximum_amount PASSED [ 85%]\nminimax/business_project/test_target.py::test_spec_005_floor_minimum_amount PASSED [100%]\n\n============================== 7 passed in 0.02s ==============================\n"
+    },
+    "context_snapshot": {
+      "task_query": "依据业务新规范 SPEC-004 与 SPEC-005: 1. 为 calculate_final_amount 增加参数合法性校验 (order_amount<=0 抛出 ValueError, discount_rate 越界抛出 ValueError); 2. 增加单笔应付金额 50000.00 元封顶限制以及 0.01 元保底规则; 3. 保持现有 baseline 会员及优惠券规则全部兼容。",
+      "database_engine": "seekdb-embedded (Local Engine)",
+      "matched_specifications": [
+        {
+          "spec_id": "SPEC-004",
+          "title": "[SPEC-004] 输入校验与异常保护 (Input Validation - Target Spec)",
+          "source_file": "business_project/specs.md",
+          "content": "### [SPEC-004] 输入校验与异常保护 (Input Validation - Target Spec)\n- **描述**:\n  - `order_amount` 必须为正数。若 `order_amount <= 0`，必须显式抛出 `ValueError(\"Order amount must be positive\")`。\n  - `discount_rate` 必须介于 `[0.0, 1.0]` 区间。若 `discount_rate < 0.0` 或 `discount_rate > 1.0`，必须显式抛出 `ValueError(\"Invalid discount rate\")`。",
+          "relevance_score": 39
+        },
+        {
+          "spec_id": "SPEC-001",
+          "title": "[SPEC-001] 基础折扣计算逻辑 (Baseline Discount)",
+          "source_file": "business_project/specs.md",
+          "content": "### [SPEC-001] 基础折扣计算逻辑 (Baseline Discount)\n- **描述**: 系统根据传入的原始订单金额 `order_amount` 与基础折扣率 `discount_rate` 进行折算。\n- **公式**: `base_amount = order_amount * (1.0 - discount_rate)`\n- **精度**: 所有最终计算金额保留 2 位小数四舍五入。",
+          "relevance_score": 38
+        },
+        {
+          "spec_id": "SPEC-005",
+          "title": "[SPEC-005] 交易金额封顶与保底规则 (Transaction Bounds - Target Spec)",
+          "source_file": "business_project/specs.md",
+          "content": "### [SPEC-005] 交易金额封顶与保底规则 (Transaction Bounds - Target Spec)\n- **描述**:\n  - **单笔封顶 (Cap)**: 经所有折扣及立减折算后的应付金额最高不超过 50,000.00 元。若计算值大于 50,000.00 元，应取 50,000.00 元。\n  - **交易保底 (Floor)**: 当订单原始金额为正数时，扣除优惠券后的实付金额最低不能低于 0.01 元（避免产生负数金额或0元结算漏洞）。",
+          "relevance_score": 31
+        },
+        {
+          "spec_id": "SPEC-002",
+          "title": "[SPEC-002] 会员等级权益折让 (Tier Privileges)",
+          "source_file": "business_project/specs.md",
+          "content": "### [SPEC-002] 会员等级权益折让 (Tier Privileges)\n- **描述**: 支持不同会员等级在基础折扣后的阶梯叠加优惠：\n  - `REGULAR`: 无额外优惠（倍率 1.0）。\n  - `VIP`: 享受额外 5% 折扣（乘以 0.95）。\n  - `SVIP`: 享受额外 10% 折扣（乘以 0.90）。",
+          "relevance_score": 22
+        },
+        {
+          "spec_id": "SPEC-003",
+          "title": "[SPEC-003] 优惠券抵扣机制 (Coupon Deduction)",
+          "source_file": "business_project/specs.md",
+          "content": "### [SPEC-003] 优惠券抵扣机制 (Coupon Deduction)\n- **描述**: 支持优惠券代码核销：\n  - 当 `coupon_code == \"SAVE10\"` 时，在会员折让后直接立减 10.00 元。\n  - 未指定或空优惠券代码时不进行立减。",
+          "relevance_score": 22
+        },
+        {
+          "spec_id": "SPEC-999",
+          "title": "[SPEC-999] 动态风控测试规格",
+          "source_file": "business_project/specs.md",
+          "content": "### [SPEC-999] 动态风控测试规格\n- **描述**: 单日风控额度动态设定为 88888 元。",
+          "relevance_score": 2
+        }
+      ],
+      "target_code_files": [
+        {
+          "material_id": "CODE-TARGET-PRICING",
+          "file_path": "business_project/target_code.py",
+          "symbols": [
+            "calculate_final_amount"
+          ],
+          "content": "# Copyright (c) 2026 OceanBase.\n#\n# Licensed under the Apache License, Version 2.0 (the \"License\");\n# you may not use this file except in compliance with the License.\n# You may obtain a copy of the License at\n#\n#     http://www.apache.org/licenses/LICENSE-2.0\n#\n# Unless required by applicable law or agreed to in writing, software\n# distributed under the License is distributed on an \"AS IS\" BASIS,\n# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\n# See the License for the specific language governing permissions and\n# limitations under the License.\n\n\"\"\"Pricing engine calculation implementation (initial snapshot before SDD task).\"\"\"\n\nfrom typing import Optional\n\n\ndef calculate_final_amount(\n    order_amount: float,\n    discount_rate: float,\n    user_tier: str = \"REGULAR\",\n    coupon_code: Optional[str] = None,\n) -> float:\n    \"\"\"Calculate the final payable order amount.\n\n    Initial implementation: supports base discount, user tiers, and coupons.\n    Pending specification: input validation (SPEC-004) and bounds (SPEC-005).\n    \"\"\"\n    amount = order_amount * (1.0 - discount_rate)\n\n    if user_tier == \"VIP\":\n        amount *= 0.95\n    elif user_tier == \"SVIP\":\n        amount *= 0.90\n\n    if coupon_code == \"SAVE10\":\n        amount -= 10.0\n\n    return round(amount, 2)\n"
+        }
+      ],
+      "verification_tests": [
+        {
+          "material_id": "TEST-SUITE-PRICING",
+          "file_path": "business_project/test_target.py",
+          "applicable_tests": [
+            "test_existing_base_discount (Regression)",
+            "test_existing_vip_discount (Regression)",
+            "test_existing_coupon_deduction (Regression)",
+            "test_spec_004_negative_amount_raises_value_error (Target)",
+            "test_spec_004_invalid_discount_rate_raises_value_error (Target)",
+            "test_spec_005_cap_maximum_amount (Target)",
+            "test_spec_005_floor_minimum_amount (Target)"
+          ],
+          "content": "# Copyright (c) 2026 OceanBase.\n#\n# Licensed under the Apache License, Version 2.0 (the \"License\");\n# you may not use this file except in compliance with the License.\n# You may obtain a copy of the License at\n#\n#     http://www.apache.org/licenses/LICENSE-2.0\n#\n# Unless required by applicable law or agreed to in writing, software\n# distributed under the License is distributed on an \"AS IS\" BASIS,\n# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\n# See the License for the specific language governing permissions and\n# limitations under the License.\n\n\"\"\"Test suite for pricing calculation engine.\"\"\"\n\nimport pytest\n\nfrom .target_code import calculate_final_amount\n\n# ==============================================================================\n# 1. 现有基线行为回归测试 (修改前通过，修改后必须保持通过)\n# ==============================================================================\n\n\ndef test_existing_base_discount() -> None:\n    \"\"\"验证 SPEC-001: 基础金额打折计算.\"\"\"\n    result = calculate_final_amount(order_amount=100.0, discount_rate=0.2)\n    assert result == 80.0\n\n\ndef test_existing_vip_discount() -> None:\n    \"\"\"验证 SPEC-002: VIP与SVIP会员额外权益折让.\"\"\"\n    vip_result = calculate_final_amount(\n        order_amount=200.0, discount_rate=0.1, user_tier=\"VIP\"\n    )\n    # 200 * 0.9 * 0.95 = 171.0\n    assert vip_result == 171.0\n\n    svip_result = calculate_final_amount(\n        order_amount=200.0, discount_rate=0.1, user_tier=\"SVIP\"\n    )\n    # 200 * 0.9 * 0.90 = 162.0\n    assert svip_result == 162.0\n\n\ndef test_existing_coupon_deduction() -> None:\n    \"\"\"验证 SPEC-003: SAVE10 优惠券立减10元机制.\"\"\"\n    result = calculate_final_amount(\n        order_amount=100.0, discount_rate=0.0, coupon_code=\"SAVE10\"\n    )\n    assert result == 90.0\n\n\n# ==============================================================================\n# 2. 目标新规格测试项 (修改前因未实现新需求而明确失败，修改后全部通过)\n# ==============================================================================\n\n\ndef test_spec_004_negative_amount_raises_value_error() -> None:\n    \"\"\"验证 SPEC-004: 订单金额非法(<=0)时必须抛出 ValueError.\"\"\"\n    with pytest.raises(ValueError, match=\"Order amount must be positive\"):\n        calculate_final_amount(order_amount=-50.0, discount_rate=0.1)\n\n    with pytest.raises(ValueError, match=\"Order amount must be positive\"):\n        calculate_final_amount(order_amount=0.0, discount_rate=0.1)\n\n\ndef test_spec_004_invalid_discount_rate_raises_value_error() -> None:\n    \"\"\"验证 SPEC-004: 折扣率超出 [0, 1] 时必须抛出 ValueError.\"\"\"\n    with pytest.raises(ValueError, match=\"Invalid discount rate\"):\n        calculate_final_amount(order_amount=100.0, discount_rate=1.5)\n\n    with pytest.raises(ValueError, match=\"Invalid discount rate\"):\n        calculate_final_amount(order_amount=100.0, discount_rate=-0.2)\n\n\ndef test_spec_005_cap_maximum_amount() -> None:\n    \"\"\"验证 SPEC-005: 单笔最终应付金额封顶上限 50000.00 元.\"\"\"\n    # 60000 无折扣计算本应为 60000，受封顶保护应限制为 50000.00\n    result = calculate_final_amount(order_amount=60000.0, discount_rate=0.0)\n    assert result == 50000.0\n\n\ndef test_spec_005_floor_minimum_amount() -> None:\n    \"\"\"验证 SPEC-005: 订单金额为正时，立减抵扣后实付金额保底最低 0.01 元.\"\"\"\n    # 5.0 元使用 SAVE10 优惠券立减10元，不得得出负数或0，应保底为 0.01\n    result = calculate_final_amount(\n        order_amount=5.0, discount_rate=0.0, coupon_code=\"SAVE10\"\n    )\n    assert result == 0.01\n"
+        }
+      ],
+      "source_evidence": [
+        "business_project/specs.md",
+        "business_project/specs.md",
+        "business_project/specs.md",
+        "business_project/specs.md",
+        "business_project/specs.md",
+        "business_project/specs.md",
+        "business_project/target_code.py",
+        "business_project/test_target.py"
+      ]
+    },
+    "code_diff": "--- target_code.py (pre-modification)\n+++ target_code.py (post-modification)\n@@ -12,7 +12,7 @@\n # See the License for the specific language governing permissions and\n # limitations under the License.\n \n-\"\"\"Pricing engine calculation implementation (initial snapshot before SDD task).\"\"\"\n+\"\"\"Pricing engine calculation implementation (updated by MiniMax SDD Agent).\"\"\"\n \n from typing import Optional\n \n@@ -23,19 +23,38 @@\n     user_tier: str = \"REGULAR\",\n     coupon_code: Optional[str] = None,\n ) -> float:\n-    \"\"\"Calculate the final payable order amount.\n+    \"\"\"Calculate the final payable order amount adhering to SDD specifications.\n \n-    Initial implementation: supports base discount, user tiers, and coupons.\n-    Pending specification: input validation (SPEC-004) and bounds (SPEC-005).\n+    Complies with:\n+    - [SPEC-001] Base discount: order_amount * (1.0 - discount_rate)\n+    - [SPEC-002] Tier privileges: VIP (5% off), SVIP (10% off)\n+    - [SPEC-003] Coupon deduction: SAVE10 gives flat 10.0 deduction\n+    - [SPEC-004] Input validation: order_amount > 0 and 0.0 <= discount_rate <= 1.0\n+    - [SPEC-005] Transaction bounds: capped at 50000.00, floored at 0.01\n     \"\"\"\n+    # [SPEC-004] Input validation & bounds checking\n+    if order_amount <= 0:\n+        raise ValueError(\"Order amount must be positive\")\n+    if discount_rate < 0.0 or discount_rate > 1.0:\n+        raise ValueError(\"Invalid discount rate\")\n+\n+    # [SPEC-001] Base discount calculation\n     amount = order_amount * (1.0 - discount_rate)\n \n+    # [SPEC-002] User tier discount\n     if user_tier == \"VIP\":\n         amount *= 0.95\n     elif user_tier == \"SVIP\":\n         amount *= 0.90\n \n+    # [SPEC-003] Coupon deduction\n     if coupon_code == \"SAVE10\":\n         amount -= 10.0\n \n+    # [SPEC-005] Bounds: cap maximum at 50,000.00 and floor minimum at 0.01\n+    if amount > 50000.0:\n+        amount = 50000.0\n+    if amount < 0.01:\n+        amount = 0.01\n+\n     return round(amount, 2)\n",
+    "updated_at": 1793520786
+  }
+}
