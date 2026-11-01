@@ -125,6 +125,12 @@ from powercontext.builtin.runtime.memory_write_gate import (
     MemoryWriteVerdict,
     build_memory_write_gate,
 )
+from powercontext.builtin.runtime.source_lifecycle import (
+    LifecycleApplication,
+    ScopedLifecycleApplication,
+    SourceLifecycleError,
+    SourceLifecycleEvent,
+)
 from powercontext.builtin.runtime.models import (
     ApproveArtifactCandidateRequest,
     CaptureSource,
@@ -288,6 +294,7 @@ __all__ = [
     "HandoffResolution",
     "HandoffSourceCitation",
     "HandoffStatement",
+    "LifecycleApplication",
     "ImportExternalSkillRequest",
     "InferenceConfig",
     "InvalidRuntimeRequestError",
@@ -361,6 +368,7 @@ __all__ = [
     "ScopedExperienceApplication",
     "ScopedExternalSkillApplication",
     "ScopedHandoffApplication",
+    "ScopedLifecycleApplication",
     "ScopedMemoryApplication",
     "ScopedReviewApplication",
     "ScopedSkillApplication",
@@ -375,6 +383,8 @@ __all__ = [
     "SkillGenerationOrigin",
     "SourceApplication",
     "SourceInventoryStatistics",
+    "SourceLifecycleError",
+    "SourceLifecycleEvent",
     "SourceReceipt",
     "SpawnArtifactProcessingWorkerLauncher",
     "Statistics",
