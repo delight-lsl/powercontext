@@ -299,6 +299,7 @@ if TYPE_CHECKING:
 
     from powercontext.builtin.handoff_report.application import HandoffReportApplication
     from powercontext.builtin.runtime.artifact_processing import ArtifactProcessingSupervisors
+    from powercontext.builtin.runtime.context_pack import ContextPack, ContextPackDelta
 
 
 class TopicMemorySearch(Protocol):
@@ -846,6 +847,28 @@ class ScopedContextApplication:
             if authorize_scopes is not None:
                 await authorize_scopes((self.scope_id, *scope.context_references))
             return await self._prepare(request, scope)
+
+    async def prepare_incremental(
+        self,
+        request: PrepareContextRequest,
+        base_pack: ContextPack | None = None,
+        *,
+        authorize_scopes: Callable[[tuple[str, ...]], Awaitable[None]] | None = None,
+        chunk_bytes: int = 512,
+    ) -> ContextPack | ContextPackDelta:
+        from powercontext.builtin.runtime.context_pack import ContextPack, ContextPackDelta, ContextPackError
+
+        if base_pack is not None:
+            if isinstance(base_pack, (bytes, bytearray, memoryview)):
+                base_pack = ContextPack.from_bytes(bytes(base_pack))
+            elif not isinstance(base_pack, ContextPack):
+                raise ContextPackError(f"base_pack must be a ContextPack, got {type(base_pack).__name__}")  # noqa: TRY003
+
+        prepared = await self.prepare(request, authorize_scopes=authorize_scopes)
+        target_pack = ContextPack.from_content(prepared.content, chunk_bytes=chunk_bytes)
+        if base_pack is None:
+            return target_pack
+        return ContextPackDelta.between(base_pack, target_pack)
 
     async def _prepare(self, request: PrepareContextRequest, scope: ScopeDescriptor, /) -> PreparedContext:
         build, effort = await self._prepare_build(request, scope)

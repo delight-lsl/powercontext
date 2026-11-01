@@ -21,7 +21,9 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
+from typing import Any, ClassVar
 
 __all__ = [
     "ContextPack",
@@ -30,320 +32,370 @@ __all__ = [
     "apply_context_pack_delta",
 ]
 
-_SCHEMA_PACK = "powercontext.context-pack.v1"
-_SCHEMA_DELTA = "powercontext.context-pack-delta.v1"
+SCHEMA_PACK = "powercontext.context-pack.v1"
+SCHEMA_DELTA = "powercontext.context-pack-delta.v1"
 
 
 class ContextPackError(ValueError):
-    """Raised when a ContextPack or ContextPackDelta wire payload is invalid."""
+    """Protocol or chunking validation error in context pack processing."""
 
 
-def _encode_json(obj: object) -> bytes:
-    """Compact, deterministic JSON encoding."""
-    return json.dumps(obj, sort_keys=True, separators=(",", ":")).encode("utf-8")
+def _encode_canonical_json(payload: Mapping[str, Any]) -> bytes:
+    """Encode a mapping to canonical JSON with sorted keys and no whitespace."""
+    return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
-def _b64_items(items: tuple[bytes, ...]) -> list[str]:
-    return [base64.b64encode(chunk).decode("ascii") for chunk in items]
+def _decode_json(data: Any, target_name: str) -> dict[str, Any]:
+    """Validate raw bytes and parse a JSON dictionary."""
+    if not isinstance(data, (bytes, bytearray, memoryview)):
+        raise ContextPackError(f"{target_name} data must be bytes, got {type(data).__name__}")
+    try:
+        decoded = json.loads(bytes(data).decode("utf-8"))
+    except Exception as exc:
+        raise ContextPackError(f"Invalid JSON for {target_name}: {exc}") from exc
+    if not isinstance(decoded, dict):
+        raise ContextPackError(f"{target_name} payload must be a JSON object")
+    return decoded
 
 
-def _compute_digest(items_b64: list[str]) -> str:
-    """SHA-256 digest over the canonical {schema, items} representation."""
-    unsigned = {"items": items_b64, "schema": _SCHEMA_PACK}
-    return "sha256:" + hashlib.sha256(_encode_json(unsigned)).hexdigest()
+def _validate_b64_utf8_items(items_raw: Any, field_name: str) -> tuple[bytes, ...]:
+    """Validate a list of Base64 strings and return their UTF-8 decoded bytes."""
+    if not isinstance(items_raw, (list, tuple)):
+        raise ContextPackError(f"'{field_name}' must be a list")
+    result: list[bytes] = []
+    for item in items_raw:
+        if not isinstance(item, str):
+            raise ContextPackError(f"Each item in '{field_name}' must be a base64 string")
+        try:
+            raw_bytes = base64.b64decode(item, validate=True)
+        except Exception as exc:
+            raise ContextPackError(f"Invalid base64 in '{field_name}': {exc}") from exc
+        try:
+            raw_bytes.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ContextPackError(f"Item in '{field_name}' is not valid UTF-8: {exc}") from exc
+        result.append(raw_bytes)
+    return tuple(result)
 
 
-def _solve_pack_bytes(items_b64: list[str], digest: str) -> bytes:
-    """Return the final canonical serialisation with the correct self-referential byte_count.
+def _compute_pack_digest(items_b64: list[str]) -> str:
+    """Compute sha256 hex digest for unsigned context pack JSON."""
+    unsigned = {
+        "items": items_b64,
+        "schema": SCHEMA_PACK,
+    }
+    canonical = _encode_canonical_json(unsigned)
+    return "sha256:" + hashlib.sha256(canonical).hexdigest()
 
-    The byte count field itself contributes to the length, so we iterate until stable
-    (typically converges in at most 2 iterations).
-    """
-    payload: dict[str, object] = {
+
+def _solve_pack_byte_count(items_b64: list[str], digest: str) -> tuple[int, bytes]:
+    """Compute the self-referential byte_count and canonical bytes for ContextPack JSON."""
+    payload = {
         "byte_count": 0,
         "digest": digest,
         "items": items_b64,
-        "schema": _SCHEMA_PACK,
+        "schema": SCHEMA_PACK,
     }
-    encoded = _encode_json(payload)
+    encoded = _encode_canonical_json(payload)
     c = len(encoded)
     payload["byte_count"] = c
-    encoded = _encode_json(payload)
+    encoded = _encode_canonical_json(payload)
     while len(encoded) != c:
         c = len(encoded)
         payload["byte_count"] = c
-        encoded = _encode_json(payload)
-    return encoded
+        encoded = _encode_canonical_json(payload)
+    return c, encoded
 
 
-def _chunk_content(content: str, chunk_bytes: int) -> tuple[bytes, ...]:
-    """Split *content* into UTF-8 byte chunks of at most *chunk_bytes* bytes.
+def _split_long_line(line: bytes, chunk_bytes: int) -> list[bytes]:
+    """Split a line exceeding chunk_bytes into UTF-8 bounded pieces."""
+    pieces: list[bytes] = []
+    idx = 0
+    n = len(line)
+    while idx < n:
+        end = min(idx + chunk_bytes, n)
+        if end < n:
+            while end > idx and (line[end] & 0xC0) == 0x80:
+                end -= 1
+            if end == idx:
+                raise ContextPackError(f"Cannot form valid UTF-8 chunk within {chunk_bytes} bytes")
+        pieces.append(line[idx:end])
+        idx = end
+    return pieces
 
-    Strategy: split on line boundaries first to maximise common prefix between
-    consecutive context packs, then split long lines on character boundaries.
-    """
-    lines: list[bytes] = [line.encode("utf-8") for line in content.splitlines(keepends=True)]
+
+def _chunk_content(content_bytes: bytes, chunk_bytes: int) -> tuple[bytes, ...]:
+    """Slice content bytes deterministically into UTF-8 bounded chunks not exceeding chunk_bytes."""
+    if not content_bytes:
+        return ()
+
     chunks: list[bytes] = []
-    current = bytearray()
+    lines = content_bytes.splitlines(keepends=True)
+    current_chunk = bytearray()
 
     for line in lines:
-        if len(line) > chunk_bytes:
-            # Flush current accumulation before splitting the oversized line.
-            if current:
-                chunks.append(bytes(current))
-                current = bytearray()
-            # Split the line character by character (decoded from UTF-8).
-            line_str = line.decode("utf-8")
-            for char in line_str:
-                char_bytes = char.encode("utf-8")
-                if len(char_bytes) > chunk_bytes:
-                    raise ContextPackError(
-                        f"Single character occupies {len(char_bytes)} bytes, exceeding chunk_bytes={chunk_bytes}"
-                    )
-                if len(current) + len(char_bytes) > chunk_bytes:
-                    chunks.append(bytes(current))
-                    current = bytearray()
-                current.extend(char_bytes)
-            if current:
-                chunks.append(bytes(current))
-                current = bytearray()
+        if len(line) <= chunk_bytes:
+            if len(current_chunk) + len(line) <= chunk_bytes:
+                current_chunk.extend(line)
+            else:
+                if current_chunk:
+                    chunks.append(bytes(current_chunk))
+                    current_chunk = bytearray()
+                current_chunk.extend(line)
         else:
-            if len(current) + len(line) > chunk_bytes:
-                chunks.append(bytes(current))
-                current = bytearray()
-            current.extend(line)
+            if current_chunk:
+                chunks.append(bytes(current_chunk))
+                current_chunk = bytearray()
+            chunks.extend(_split_long_line(line, chunk_bytes))
 
-    if current:
-        chunks.append(bytes(current))
+    if current_chunk:
+        chunks.append(bytes(current_chunk))
 
     return tuple(chunks)
 
 
-@dataclass(frozen=True, eq=True)
+def _is_valid_sha256(digest: Any) -> bool:
+    """Check if digest is a canonical sha256:<hex> string."""
+    if not isinstance(digest, str) or not digest.startswith("sha256:") or len(digest) != 71:
+        return False
+    hex_part = digest[7:]
+    return all(c in "0123456789abcdefABCDEF" for c in hex_part)
+
+
+@dataclass(frozen=True, slots=True)
 class ContextPack:
-    """A complete context payload split into verifiable byte chunks.
-
-    Wire format (JSON, compact, sorted keys)::
-
-        {
-          "byte_count": <int>,
-          "digest": "sha256:<hex>",
-          "items": ["<base64>", ...],
-          "schema": "powercontext.context-pack.v1"
-        }
-
-    ``byte_count`` is self-referential — its value equals ``len(to_bytes())``.
-    ``digest`` covers only the ``{schema, items}`` subset.
-    """
+    """Complete, self-verifying context package with chunked contents."""
 
     items: tuple[bytes, ...]
     digest: str
     byte_count: int
-    # Internal: precomputed serialisation, not part of equality / hash.
-    _cached_bytes: bytes = field(default=b"", repr=False, compare=False)
+    _cached_bytes: bytes = field(default=b"", repr=False, compare=False, hash=False)
 
-    # ------------------------------------------------------------------
-    # Constructors
-    # ------------------------------------------------------------------
+    schema: ClassVar[str] = SCHEMA_PACK
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.items, tuple):
+            object.__setattr__(self, "items", tuple(self.items))
+        if type(self.byte_count) is not int or isinstance(self.byte_count, bool) or self.byte_count < 0:
+            raise ContextPackError("byte_count must be a non-negative integer")
+
+    @property
+    def content(self) -> str:
+        """Return the reconstructed full context string decoded as UTF-8."""
+        return b"".join(self.items).decode("utf-8")
+
+    @property
+    def text(self) -> str:
+        """Alias for content."""
+        return self.content
+
+    def to_bytes(self) -> bytes:
+        """Serialize this context pack into canonical wire JSON bytes."""
+        if self._cached_bytes:
+            return self._cached_bytes
+        payload = {
+            "byte_count": self.byte_count,
+            "digest": self.digest,
+            "items": [base64.b64encode(b).decode("ascii") for b in self.items],
+            "schema": self.schema,
+        }
+        encoded = _encode_canonical_json(payload)
+        object.__setattr__(self, "_cached_bytes", encoded)
+        return encoded
 
     @classmethod
-    def build(cls, items: tuple[bytes, ...] | list[bytes]) -> ContextPack:
-        """Build a ContextPack from raw byte chunks."""
-        items_tuple = tuple(items)
-        items_b64 = _b64_items(items_tuple)
-        digest = _compute_digest(items_b64)
-        encoded = _solve_pack_bytes(items_b64, digest)
-        byte_count = len(encoded)
-        obj = object.__new__(cls)
-        object.__setattr__(obj, "items", items_tuple)
-        object.__setattr__(obj, "digest", digest)
-        object.__setattr__(obj, "byte_count", byte_count)
-        object.__setattr__(obj, "_cached_bytes", encoded)
-        return obj
+    def build(cls, items: Iterable[bytes]) -> ContextPack:
+        """Construct a ContextPack from an item sequence, verifying UTF-8 and computing digest."""
+        validated_items: list[bytes] = []
+        for item in items:
+            if not isinstance(item, (bytes, bytearray, memoryview)):
+                raise ContextPackError(f"All items must be bytes, got {type(item).__name__}")
+            b = bytes(item)
+            try:
+                b.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise ContextPackError("Each item must be valid UTF-8") from exc
+            validated_items.append(b)
+        items_tuple = tuple(validated_items)
+        items_b64 = [base64.b64encode(b).decode("ascii") for b in items_tuple]
+        digest = _compute_pack_digest(items_b64)
+        byte_count, encoded = _solve_pack_byte_count(items_b64, digest)
+        return cls(items=items_tuple, digest=digest, byte_count=byte_count, _cached_bytes=encoded)
 
     @classmethod
-    def from_content(cls, content: str, *, chunk_bytes: int = 512) -> ContextPack:
-        """Chunk *content* into UTF-8 byte chunks and build a ContextPack.
+    def from_content(
+        cls,
+        content: str | bytes | None,
+        *,
+        chunk_bytes: int = 512,
+    ) -> ContextPack:
+        """Chunk raw content deterministically into valid UTF-8 segments bounded by chunk_bytes."""
+        if type(chunk_bytes) is not int or isinstance(chunk_bytes, bool) or chunk_bytes < 1:
+            raise ContextPackError("chunk_bytes must be a positive integer")
 
-        Raises :class:`ContextPackError` if a single character cannot fit in *chunk_bytes*.
-        """
-        content_bytes = content.encode("utf-8")
-        if len(content_bytes) > 0 and chunk_bytes > 0:
-            # Validate that every character individually can fit.
-            for char in content:
-                cb = char.encode("utf-8")
-                if len(cb) > chunk_bytes:
-                    raise ContextPackError(
-                        f"Character U+{ord(char):04X} requires {len(cb)} bytes but chunk_bytes={chunk_bytes}"
-                    )
-        chunks = _chunk_content(content, chunk_bytes)
+        if content is None:
+            return cls.build(())
+
+        if isinstance(content, str):
+            content_bytes = content.encode("utf-8")
+        elif isinstance(content, (bytes, bytearray, memoryview)):
+            content_bytes = bytes(content)
+            try:
+                content_bytes.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise ContextPackError("content must be valid UTF-8") from exc
+        else:
+            raise ContextPackError(f"content must be str, bytes, or None, got {type(content).__name__}")
+
+        if not content_bytes:
+            return cls.build(())
+
+        chunks = _chunk_content(content_bytes, chunk_bytes)
         return cls.build(chunks)
 
     @classmethod
     def from_bytes(cls, data: bytes) -> ContextPack:
-        """Deserialise and verify a wire-format ContextPack.
+        """Deserialize and strictly validate a ContextPack from canonical wire JSON bytes."""
+        payload = _decode_json(data, "ContextPack")
+        if set(payload.keys()) != {"schema", "items", "digest", "byte_count"}:
+            raise ContextPackError(f"ContextPack keys mismatch: {set(payload.keys())}")
+        if payload["schema"] != cls.schema:
+            raise ContextPackError(f"Invalid schema: {payload['schema']}")
 
-        Raises :class:`ContextPackError` on any structural or digest mismatch.
-        """
-        try:
-            payload = json.loads(data)
-        except json.JSONDecodeError as exc:
-            raise ContextPackError(f"Invalid JSON: {exc}") from exc
-        if not isinstance(payload, dict):
-            raise ContextPackError("Payload must be a JSON object")
-        required = {"schema", "items", "digest", "byte_count"}
-        missing = required - payload.keys()
-        if missing:
-            raise ContextPackError(f"Missing fields: {missing}")
-        if payload["schema"] != _SCHEMA_PACK:
-            raise ContextPackError(f"Unknown schema: {payload['schema']!r}")
-        try:
-            items_b64: list[str] = list(payload["items"])
-            items_tuple = tuple(base64.b64decode(b) for b in items_b64)
-        except Exception as exc:
-            raise ContextPackError(f"Invalid items encoding: {exc}") from exc
-        expected_digest = _compute_digest(list(items_b64))
-        if payload["digest"] != expected_digest:
-            raise ContextPackError(f"Digest mismatch: got {payload['digest']!r}, expected {expected_digest!r}")
-        pack = cls.build(items_tuple)
-        if pack.byte_count != payload.get("byte_count"):
-            raise ContextPackError("byte_count mismatch")
-        return pack
+        byte_count = payload["byte_count"]
+        if type(byte_count) is not int or isinstance(byte_count, bool) or byte_count < 0:
+            raise ContextPackError("byte_count must be a non-negative integer")
+        if byte_count != len(data):
+            raise ContextPackError(f"byte_count mismatch: payload says {byte_count}, data is {len(data)}")
 
-    # ------------------------------------------------------------------
-    # Serialisation
-    # ------------------------------------------------------------------
+        digest = payload["digest"]
+        if not _is_valid_sha256(digest):
+            raise ContextPackError("digest must be a sha256 string")
 
-    def to_bytes(self) -> bytes:
-        """Return the canonical wire-format serialisation."""
-        if self._cached_bytes:
-            return self._cached_bytes
-        items_b64 = _b64_items(self.items)
-        encoded = _solve_pack_bytes(items_b64, self.digest)
-        return encoded
+        items_raw = payload["items"]
+        items = _validate_b64_utf8_items(items_raw, "items")
+
+        expected_digest = _compute_pack_digest(items_raw)
+        if digest != expected_digest:
+            raise ContextPackError(f"digest mismatch: expected {expected_digest}, got {digest}")
+
+        return cls(items=items, digest=digest, byte_count=byte_count, _cached_bytes=bytes(data))
 
 
-@dataclass(frozen=True, eq=True)
+@dataclass(frozen=True, slots=True)
 class ContextPackDelta:
-    """An incremental update from one ContextPack to another.
-
-    Wire format (JSON, compact, sorted keys)::
-
-        {
-          "appended": ["<base64>", ...],
-          "base_digest": "sha256:<hex>",
-          "prefix_items": <int>,
-          "schema": "powercontext.context-pack-delta.v1",
-          "target_digest": "sha256:<hex>"
-        }
-
-    ``byte_count`` is a **computed property** — it is NOT part of the wire format.
-    """
+    """Incremental delta reusing a base pack prefix and carrying appended items."""
 
     base_digest: str
     target_digest: str
     prefix_items: int
-    appended: tuple[bytes, ...]
+    appended: tuple[bytes, ...] = ()
+    _cached_bytes: bytes = field(default=b"", repr=False, compare=False, hash=False)
 
-    # ------------------------------------------------------------------
-    # Properties
-    # ------------------------------------------------------------------
+    schema: ClassVar[str] = SCHEMA_DELTA
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.appended, tuple):
+            object.__setattr__(self, "appended", tuple(self.appended))
 
     @property
     def byte_count(self) -> int:
-        """Number of bytes in the wire representation (not a wire field)."""
+        """Return the wire serialized byte count of this delta."""
         return len(self.to_bytes())
 
-    # ------------------------------------------------------------------
-    # Constructors
-    # ------------------------------------------------------------------
-
-    @classmethod
-    def between(cls, base: ContextPack, target: ContextPack) -> ContextPackDelta:
-        """Compute the minimal delta from *base* to *target* using longest common prefix."""
-        prefix = 0
-        for b_chunk, t_chunk in zip(base.items, target.items, strict=False):
-            if b_chunk == t_chunk:
-                prefix += 1
-            else:
-                break
-        appended = target.items[prefix:]
-        return cls(
-            base_digest=base.digest,
-            target_digest=target.digest,
-            prefix_items=prefix,
-            appended=appended,
-        )
+    def to_bytes(self) -> bytes:
+        """Serialize this delta into canonical wire JSON bytes."""
+        if self._cached_bytes:
+            return self._cached_bytes
+        payload = {
+            "appended": [base64.b64encode(b).decode("ascii") for b in self.appended],
+            "base_digest": self.base_digest,
+            "prefix_items": self.prefix_items,
+            "schema": self.schema,
+            "target_digest": self.target_digest,
+        }
+        encoded = _encode_canonical_json(payload)
+        object.__setattr__(self, "_cached_bytes", encoded)
+        return encoded
 
     @classmethod
     def from_bytes(cls, data: bytes) -> ContextPackDelta:
-        """Deserialise and validate a wire-format ContextPackDelta.
+        """Deserialize and strictly validate a ContextPackDelta from canonical wire JSON bytes."""
+        payload = _decode_json(data, "ContextPackDelta")
+        if set(payload.keys()) != {"schema", "base_digest", "target_digest", "prefix_items", "appended"}:
+            raise ContextPackError(f"ContextPackDelta keys mismatch: {set(payload.keys())}")
+        if payload["schema"] != cls.schema:
+            raise ContextPackError(f"Invalid schema: {payload['schema']}")
 
-        Raises :class:`ContextPackError` on structural errors.
-        """
-        try:
-            payload = json.loads(data)
-        except json.JSONDecodeError as exc:
-            raise ContextPackError(f"Invalid JSON: {exc}") from exc
-        if not isinstance(payload, dict):
-            raise ContextPackError("Payload must be a JSON object")
-        required = {"schema", "base_digest", "target_digest", "prefix_items", "appended"}
-        missing = required - payload.keys()
-        if missing:
-            raise ContextPackError(f"Missing fields: {missing}")
-        if payload["schema"] != _SCHEMA_DELTA:
-            raise ContextPackError(f"Unknown schema: {payload['schema']!r}")
+        base_digest = payload["base_digest"]
+        target_digest = payload["target_digest"]
+        if not _is_valid_sha256(base_digest):
+            raise ContextPackError("base_digest must be a sha256 string")
+        if not _is_valid_sha256(target_digest):
+            raise ContextPackError("target_digest must be a sha256 string")
+
         prefix = payload["prefix_items"]
-        # Reject bool (True/False) and non-integer types like float.
-        if type(prefix) is not int:
-            raise ContextPackError(f"prefix_items must be a plain integer, got {type(prefix).__name__}")
-        if prefix < 0:
-            raise ContextPackError(f"prefix_items must be non-negative, got {prefix}")
-        try:
-            appended = tuple(base64.b64decode(b) for b in payload["appended"])
-        except Exception as exc:
-            raise ContextPackError(f"Invalid appended encoding: {exc}") from exc
+        if type(prefix) is not int or isinstance(prefix, bool) or prefix < 0:
+            raise ContextPackError(f"prefix_items must be a non-negative integer, got {prefix!r}")
+
+        appended_raw = payload["appended"]
+        appended = _validate_b64_utf8_items(appended_raw, "appended")
+
         return cls(
-            base_digest=payload["base_digest"],
-            target_digest=payload["target_digest"],
+            base_digest=base_digest,
+            target_digest=target_digest,
             prefix_items=prefix,
+            appended=appended,
+            _cached_bytes=bytes(data),
+        )
+
+    @classmethod
+    def between(cls, base: ContextPack, target: ContextPack) -> ContextPackDelta:
+        """Compute the longest common prefix between base and target packs."""
+        if not isinstance(base, ContextPack) or not isinstance(target, ContextPack):
+            raise ContextPackError("between requires ContextPack instances for base and target")
+
+        prefix_items = 0
+        for b, t in zip(base.items, target.items, strict=False):
+            if b == t:
+                prefix_items += 1
+            else:
+                break
+
+        appended = target.items[prefix_items:]
+        return cls(
+            base_digest=base.digest,
+            target_digest=target.digest,
+            prefix_items=prefix_items,
             appended=appended,
         )
 
-    # ------------------------------------------------------------------
-    # Serialisation
-    # ------------------------------------------------------------------
-
-    def to_bytes(self) -> bytes:
-        """Return the canonical wire-format serialisation."""
-        payload = {
-            "appended": _b64_items(self.appended),
-            "base_digest": self.base_digest,
-            "prefix_items": self.prefix_items,
-            "schema": _SCHEMA_DELTA,
-            "target_digest": self.target_digest,
-        }
-        return _encode_json(payload)
-
 
 def apply_context_pack_delta(base: ContextPack, delta: ContextPackDelta) -> ContextPack:
-    """Reconstruct the target ContextPack from *base* and *delta*.
+    """Validate and apply a ContextPackDelta to base to reconstruct the target ContextPack."""
+    if not isinstance(base, ContextPack):
+        raise ContextPackError(f"base must be a ContextPack, got {type(base).__name__}")
+    if not isinstance(delta, ContextPackDelta):
+        raise ContextPackError(f"delta must be a ContextPackDelta, got {type(delta).__name__}")
 
-    Raises :class:`ContextPackError` if:
-    - ``delta.base_digest`` does not match ``base.digest``,
-    - ``delta.prefix_items`` exceeds the number of base items, or
-    - the reconstructed target digest does not match ``delta.target_digest``.
-    """
-    if delta.base_digest != base.digest:
-        raise ContextPackError(f"Base digest mismatch: delta expects {delta.base_digest!r}, base has {base.digest!r}")
+    if base.digest != delta.base_digest:
+        raise ContextPackError(f"Base digest mismatch: expected {delta.base_digest}, got {base.digest}")
+
+    if type(delta.prefix_items) is not int or isinstance(delta.prefix_items, bool) or delta.prefix_items < 0:
+        raise ContextPackError(f"prefix_items must be a non-negative integer, got {delta.prefix_items!r}")
+
     if delta.prefix_items > len(base.items):
-        raise ContextPackError(f"prefix_items={delta.prefix_items} exceeds base length {len(base.items)}")
-    target_items = base.items[: delta.prefix_items] + delta.appended
-    target = ContextPack.build(target_items)
-    if target.digest != delta.target_digest:
-        raise ContextPackError(f"Target digest mismatch: expected {delta.target_digest!r}, got {target.digest!r}")
-    return target
+        raise ContextPackError(f"prefix_items {delta.prefix_items} exceeds base items count {len(base.items)}")
+
+    reconstructed_items = base.items[: delta.prefix_items] + delta.appended
+    target_pack = ContextPack.build(reconstructed_items)
+
+    if target_pack.digest != delta.target_digest:
+        raise ContextPackError(
+            f"Target digest mismatch: expected {delta.target_digest}, reconstructed {target_pack.digest}"
+        )
+
+    return target_pack
 
 
-# Convenience union type for callers returning either a full pack or a delta.
 ContextPackOrDelta = ContextPack | ContextPackDelta

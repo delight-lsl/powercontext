@@ -1,4 +1,3 @@
-# ruff: noqa: TRY003
 # Copyright (c) 2026 OceanBase.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,6 +14,8 @@
 
 """Incremental Context Pack serialization, delta computation, and verified reconstruction."""
 
+# ruff: noqa: TRY003
+
 from __future__ import annotations
 
 import base64
@@ -23,6 +24,13 @@ import json
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
+
+__all__ = [
+    "ContextPack",
+    "ContextPackDelta",
+    "ContextPackError",
+    "apply_context_pack_delta",
+]
 
 SCHEMA_PACK = "powercontext.context-pack.v1"
 SCHEMA_DELTA = "powercontext.context-pack-delta.v1"
@@ -161,7 +169,7 @@ class ContextPack:
     items: tuple[bytes, ...]
     digest: str
     byte_count: int
-    _cached_bytes: bytes = field(default=b"", repr=False, compare=False)
+    _cached_bytes: bytes = field(default=b"", repr=False, compare=False, hash=False)
 
     schema: ClassVar[str] = SCHEMA_PACK
 
@@ -222,7 +230,7 @@ class ContextPack:
         chunk_bytes: int = 512,
     ) -> ContextPack:
         """Chunk raw content deterministically into valid UTF-8 segments bounded by chunk_bytes."""
-        if not isinstance(chunk_bytes, int) or isinstance(chunk_bytes, bool) or chunk_bytes < 1:
+        if type(chunk_bytes) is not int or isinstance(chunk_bytes, bool) or chunk_bytes < 1:
             raise ContextPackError("chunk_bytes must be a positive integer")
 
         if content is None:
@@ -282,7 +290,7 @@ class ContextPackDelta:
     target_digest: str
     prefix_items: int
     appended: tuple[bytes, ...] = ()
-    _cached_bytes: bytes = field(default=b"", repr=False, compare=False)
+    _cached_bytes: bytes = field(default=b"", repr=False, compare=False, hash=False)
 
     schema: ClassVar[str] = SCHEMA_DELTA
 
@@ -390,9 +398,4 @@ def apply_context_pack_delta(base: ContextPack, delta: ContextPackDelta) -> Cont
     return target_pack
 
 
-__all__ = [
-    "ContextPack",
-    "ContextPackDelta",
-    "ContextPackError",
-    "apply_context_pack_delta",
-]
+ContextPackOrDelta = ContextPack | ContextPackDelta
