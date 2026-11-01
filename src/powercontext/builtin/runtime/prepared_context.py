@@ -106,6 +106,7 @@ class PreparedContextBuild:
     origins: tuple[PreparedContextOrigin, ...]
     omissions: PreparedContextOmissions = PreparedContextOmissions()
     code_origins: tuple[CodeEvidenceRef, ...] = ()
+    fragments: tuple[EvidenceFragment, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -115,6 +116,16 @@ class MemoryEntryAddress:
     memory: ArtifactAddress
     entry_id: str
     entry_version_id: str
+
+
+@dataclass(frozen=True)
+class EvidenceFragment:
+    """Identify one literal evidence fragment from a Memory entry."""
+
+    address: MemoryEntryAddress
+    start: int
+    end: int
+    text: str
 
 
 PreparedContextOrigin = MemoryCitation | ArtifactRef | MemoryEntryAddress | ArtifactAddress
@@ -230,6 +241,38 @@ class PreparedContextBuilder:
 
         if sum(len(candidates.hits) for candidates in memory_candidates) > self.memory_candidate_limit:
             raise PreparedContextInvariantError("memory-candidate-limit")
+
+        if request.evidence_selection:
+            from powercontext.builtin.runtime.evidence_selection import select_evidence
+
+            content, fragments = select_evidence(
+                query=request.query,
+                memory_candidates=memory_candidates,
+                max_bytes=request.max_bytes,
+                trust_policy=TRUST_POLICY,
+                begin_marker=_BEGIN_MARKER,
+                end_marker=_END_MARKER,
+                current_scope_id=current_scope_id,
+            )
+            if content is None:
+                return PreparedContextBuild(
+                    context=self.empty(),
+                    origins=(),
+                    omissions=PreparedContextOmissions(),
+                    fragments=(),
+                )
+            context = PreparedContext(
+                status="ready",
+                content=content,
+                content_bytes=len(content.encode("utf-8")),
+            )
+            origins = tuple(fragment.address for fragment in fragments)
+            return PreparedContextBuild(
+                context=context,
+                origins=origins,
+                omissions=PreparedContextOmissions(),
+                fragments=fragments,
+            )
         if len(topic_memory_hits) > self.topic_memory_candidate_limit:
             raise PreparedContextInvariantError("topic-memory-candidate-limit")
         if sum(len(candidates.hits) for candidates in experience_candidates) > self.experience_candidate_limit:
