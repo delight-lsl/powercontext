@@ -1,7 +1,8 @@
 services:
   heartguide-memory:
     image: langgenius/dify-api:1.18.0
-    command: ["python", "/app/heartguide_memory.py"]
+    entrypoint: ["python"]
+    command: ["/app/heartguide_memory.py"]
     environment:
       SEEKDB_HOST: ${OCEANBASE_VECTOR_HOST:?Set the SeekDB host in .env}
       SEEKDB_PORT: ${OCEANBASE_VECTOR_PORT:-2881}

@@ -61,6 +61,19 @@ class HeartguideMemoryTests(unittest.TestCase):
         self.assertIn('"慢一点"\n', payload["user_message"])
         self.assertEqual(payload["assistant_message"], "好，我会记住。")
 
+    def test_compose_overrides_api_entrypoint(self):
+        compose = yaml.safe_load(
+            (
+                Path(__file__).resolve().parents[1]
+                / "deploy"
+                / "docker"
+                / "docker-compose.heartguide.yaml"
+            ).read_text(encoding="utf-8")
+        )
+        service = compose["services"]["heartguide-memory"]
+        self.assertEqual(service["entrypoint"], ["python"])
+        self.assertEqual(service["command"], ["/app/heartguide_memory.py"])
+
 
 if __name__ == "__main__":
     unittest.main()
