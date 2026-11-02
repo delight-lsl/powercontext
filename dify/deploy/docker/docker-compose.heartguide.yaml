@@ -11,7 +11,7 @@ services:
       SEEKDB_DATABASE: ${OCEANBASE_VECTOR_DATABASE:-dify}
       PORT: 8090
     volumes:
-      - ../../runtime/heartguide_memory.py:/app/heartguide_memory.py:ro
+      - ${HEARTGUIDE_RUNTIME_DIR:-../../runtime}/heartguide_memory.py:/app/heartguide_memory.py:ro
     restart: always
     networks:
       - default

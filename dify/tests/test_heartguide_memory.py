@@ -73,6 +73,10 @@ class HeartguideMemoryTests(unittest.TestCase):
         service = compose["services"]["heartguide-memory"]
         self.assertEqual(service["entrypoint"], ["python"])
         self.assertEqual(service["command"], ["/app/heartguide_memory.py"])
+        self.assertIn(
+            "${HEARTGUIDE_RUNTIME_DIR:-../../runtime}",
+            service["volumes"][0],
+        )
 
 
 if __name__ == "__main__":

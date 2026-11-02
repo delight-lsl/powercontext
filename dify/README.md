@@ -53,9 +53,14 @@ OCEANBASE_VECTOR_USER=dify
 OCEANBASE_VECTOR_PASSWORD=<SEEKDB_PASSWORD>
 OCEANBASE_VECTOR_DATABASE=dify
 SSRF_PROXY_ALLOW_PRIVATE_DOMAINS=heartguide-memory
+# If this override is placed into an existing Dify checkout instead of this
+# repository's dify/deploy/docker directory, use the actual runtime path:
+# HEARTGUIDE_RUNTIME_DIR=/root/difypg/dify/runtime
 ```
 
 `heartguide-memory` 只加入 Docker 内部网络，没有 `ports` 映射。`SSRF_PROXY_ALLOW_PRIVATE_DOMAINS` 只放行这个固定服务名，使 Dify HTTP Request 节点能通过 SSRF proxy 访问它；不要改成放行整个私网网段。修改 SSRF 配置后需要重建 `ssrf_proxy`。
+
+如果沿用服务器已有的上游 Dify 目录 `/root/difypg/dify/docker`，还要把项目的 `runtime/heartguide_memory.py` 放到 `/root/difypg/dify/runtime/`，并在该 `.env` 中设置 `HEARTGUIDE_RUNTIME_DIR=/root/difypg/dify/runtime`。在本仓库的标准目录执行时可以省略该变量。
 
 启动记忆服务并检查 Compose 配置：
 
