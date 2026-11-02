@@ -62,12 +62,19 @@ def main():
         raise ValueError("HEARTGUIDE_MOCK_RUN_ID must be at most 64 characters")
 
     player_id = "reviewer-" + run_id
+    db_host = os.environ.get("DB_HOST") or os.environ["SEEKDB_HOST"]
+    db_port = int(os.environ.get("DB_PORT") or os.environ.get("SEEKDB_PORT", "2881"))
+    db_user = os.environ.get("DB_USERNAME") or os.environ["SEEKDB_USER"]
+    db_password = os.environ.get("DB_PASSWORD") or os.environ["SEEKDB_PASSWORD"]
+    db_name = os.environ.get("DB_DATABASE") or os.environ.get(
+        "SEEKDB_DATABASE", "dify"
+    )
     connection = pymysql.connect(
-        host=os.environ["DB_HOST"],
-        port=int(os.environ["DB_PORT"]),
-        user=os.environ["DB_USERNAME"],
-        password=os.environ["DB_PASSWORD"],
-        database=os.environ["DB_DATABASE"],
+        host=db_host,
+        port=db_port,
+        user=db_user,
+        password=db_password,
+        database=db_name,
         connect_timeout=10,
         charset="utf8mb4",
         autocommit=False,

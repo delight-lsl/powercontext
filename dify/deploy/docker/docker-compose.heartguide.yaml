@@ -1,0 +1,17 @@
+services:
+  heartguide-memory:
+    image: langgenius/dify-api:1.18.0
+    command: ["python", "/app/heartguide_memory.py"]
+    environment:
+      SEEKDB_HOST: ${OCEANBASE_VECTOR_HOST:?Set the SeekDB host in .env}
+      SEEKDB_PORT: ${OCEANBASE_VECTOR_PORT:-2881}
+      SEEKDB_USER: ${OCEANBASE_VECTOR_USER:?Set the SeekDB user in .env}
+      SEEKDB_PASSWORD: ${OCEANBASE_VECTOR_PASSWORD:?Set the SeekDB password in .env}
+      SEEKDB_DATABASE: ${OCEANBASE_VECTOR_DATABASE:-dify}
+      PORT: 8090
+    volumes:
+      - ../../runtime/heartguide_memory.py:/app/heartguide_memory.py:ro
+    restart: always
+    networks:
+      - default
+      - ssrf_proxy_network

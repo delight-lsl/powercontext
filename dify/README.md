@@ -1,117 +1,178 @@
 # 心动练习生 · 闻溪
 
-一款 Dify Chatflow 虚拟恋爱互动作品。用户和虚构 AI 角色闻溪在雨后的旧书店约会，在有趣的日常互动中练习表达、倾听、同意、边界和冲突修复。关系不会按分数升级，也不会把控制、占有或牺牲自我包装成爱情。
+一款 Dify Chatflow 虚拟恋爱互动作品。用户和虚构 AI 角色闻溪在雨后的旧书店约会，在日常互动中练习表达、倾听、同意、边界和冲突修复。
 
-## 技术分工
+## 作品与技术分工
 
-- Dify 1.18.0 Chatflow 编排开始、带会话窗口的模型调用和回复；Dify 保存会话与消息。
-- seekdb v1.4.0.0 通过 MySQL 兼容协议承担 Dify 主数据库，实际持久化应用、会话和消息记录。Dify 同时配置 seekdb 作为向量存储后端；本作品不依赖知识库检索，也不声称向量检索参与了对话。
-- 模型由评审在 Dify 中配置。默认示例为 OpenAI 兼容的 `gpt-4o-mini`，不包含任何 API 凭据。
+- Dify 1.18.0 Chatflow 承担完整主流程：开始、读取记忆、Qwen 模型回复、保存回合、回复。
+- `qwen3.7-max` 由 Dify Tongyi provider `langgenius/tongyi/tongyi` 提供；目标环境已核对 `langgenius/tongyi` `0.2.26`。API Key 由部署者在 Dify 工作区配置，不提交到仓库。
+- SeekDB 通过 MySQL 兼容协议承担应用状态存储，而不是只作为“已安装但未使用”的后端：
+  - `heartguide_profiles`：用户明确要求保存的跨会话偏好。
+  - `heartguide_turns`：每个 Dify 用户会话的 user/assistant 回合。
+  - `heartguide_memory_reads`：每次 Chatflow 读取记忆的审计记录，包含是否命中偏好。
+- Chatflow 的 HTTP Request 节点在 LLM 前后调用 `heartguide-memory` 内网服务。该服务把数据实际读写到 SeekDB；Dify 主库可以继续使用现有 PostgreSQL。
+- 本作品声明使用 Dify + SeekDB，不把 PowerContext 作为额外运行依赖。
+- 目标验证环境的 SeekDB 版本为 `v1.4.0.0`；其他版本需要按其 MySQL 兼容能力重新执行 SQL 和回归样例。
+
+因此，评审不需要把 Dify 主数据库迁移到 SeekDB 才能验收本作品。只要按下文启动内网服务、导入 DSL 并执行样例，即可通过 SQL 核对 SeekDB 的读、写和跨会话复用。
 
 ## 文件
 
-- `heartguide.yml`：唯一需要导入的 Dify Chatflow DSL。
-- `init_seekdb.sql`：创建应用数据库和最小权限运行账号的 SQL 模板。
-- `seekdb.env.example`：Dify Compose 的 seekdb 部署配置模板，所有凭据均为占位值。
-- `deploy/docker/`：Dify 官方 Docker Compose 部署文件，来源及固定版本见下文。
+- `heartguide.yml`：需要导入 Dify 的 Chatflow DSL。
+- `runtime/heartguide_memory.py`：SeekDB 记忆服务源码；启动时自动创建三张应用表。
+- `deploy/docker/docker-compose.heartguide.yaml`：把记忆服务加入 Dify Compose 网络，不发布公网端口。
+- `init_seekdb.sql`：以管理员身份初始化数据库、运行账号和三张应用表。
+- `seekdb.env.example`：Dify 使用 SeekDB 作为主数据库时的可选部署模板；现有 PostgreSQL 部署不需要切换 `DB_TYPE`。
+- `verify_chatflow.py`：真实 Dify API 验收脚本，执行五轮样例并记录 Dify 返回的运行 ID。
+- `mock/heartguide_memory_e2e.py`：调用真实记忆服务 HTTP 接口并用 SQL 回读的确定性主链路替身。
+- `mock/seekdb_chatflow_mock.py`：没有模型 API Key 时的确定性本地替身，只用于验证 SeekDB 回合读写逻辑，不替代真实 Dify 运行证据。
 
 ## 部署
 
-目标环境为 Linux x86_64、Docker Engine 20.10+、Docker Compose v2，以及 Dify API 镜像内置的 PyMySQL。以下命令均从本项目 `dify` 目录执行。若服务器上已经有 seekdb，可复用现有实例；不要启动 Compose 中自带的 `seekdb` profile。
+目标环境为 Linux x86_64、Docker Engine 20.10+、Docker Compose v2。以下命令从仓库的 `dify` 目录执行。若已有 Dify 1.18.0 和 SeekDB，可保留现有 Dify 主数据库；不要因为本项目而删除现有 PostgreSQL 数据。
 
-Dify 1.18.0 的迁移 `9b7c6d5e4f3a -> 5578e028b2f2` 使用 seekdb 尚不支持的 MySQL 临时表 CTAS。`compat/seekdb_empty_model_migration.py` 仅在 revision 精确匹配且迁移涉及的五张模型配置表都为空时，将该纯数据迁移标记为完成；任一表非空或 revision 不符都会拒绝修改。它不会跳过包含数据的迁移，也不修改应用、会话或消息表。
+### 1. 初始化 SeekDB
 
-1. 在 seekdb 管理连接上执行初始化 SQL。先生成强随机密码，并把 `init_seekdb.sql` 中的 `CHANGE_ME` 替换为该密码。Dify 1.18 的插件守护进程要求非空数据库密码，因此不要使用无密码的 `root` 账号：
+在 SeekDB 管理连接执行一次。先把 `init_seekdb.sql` 中的 `CHANGE_ME` 替换为随机密码；不要把真实密码写入仓库。
 
-   ```bash
-   openssl rand -hex 24
-   # 将 init_seekdb.sql 中的 CHANGE_ME 替换为生成值后执行
-   mysql -h 127.0.0.1 -P 10100 -uroot < init_seekdb.sql
-   ```
+```bash
+openssl rand -hex 24
+mysql -h <SEEKDB_HOST> -P <SEEKDB_PORT> -uroot -p < init_seekdb.sql
+```
 
-2. 配置 Dify。复制 `seekdb.env.example` 为 `deploy/docker/.env`，将 `<SERVER_IP>` 改为评审可访问的服务器地址；为每种 `CHANGE_ME_...` 生成独立随机值。`CHANGE_ME_SEEKDB_PASSWORD` 必须与第 1 步 SQL 中的密码相同，`CHANGE_ME_SANDBOX_KEY` 的两处也必须相同。`DIFY_AGENT_LOCAL_SANDBOX_AUTH_TOKEN` 是 shellctl 本地沙箱的独立随机 token，不要留空或复用数据库密码。`DB_HOST` 和 `OCEANBASE_VECTOR_HOST` 使用 Docker 宿主机网关；本样例 Linux Docker 网桥地址为 `172.17.0.1`，如环境不同，用 `ip route` 和容器连通性检查替换。
+如果服务器已有专用 SeekDB 用户和数据库，保留已有账号并单独执行文件中的三段 `CREATE TABLE` 语句；运行服务使用的账号必须拥有 `dify` 数据库这三张表的读写权限。
 
-3. 从 Dify 部署目录启动：
+### 2. 配置 Dify Compose
 
-   ```bash
-   cd deploy/docker
-   docker compose config --quiet
-   docker compose up -d
-   docker compose exec -T api python - < ../../compat/seekdb_empty_model_migration.py
-   docker compose restart api worker worker_beat api_websocket
-   docker compose ps
-   ```
+在 `dify/deploy/docker/.env` 中确认以下变量指向同一个 SeekDB 实例。变量名沿用 Dify 的 SeekDB 向量后端配置，记忆服务和向量后端可以共用连接信息：
 
-   首次启动会执行 Dify 数据库迁移。兼容脚本输出五张表的行数和 `empty_data_migration_marked_applied=5578e028b2f2` 后，重启服务以继续迁移。若脚本拒绝执行，不要手工推进 revision；保留数据并使用支持该迁移的 Dify/seekdb 版本或适配实现。入口为 `http://<SERVER_IP>:18080`。首次打开页面创建管理员账号。
+```dotenv
+OCEANBASE_VECTOR_HOST=<SEEKDB_HOST_REACHABLE_FROM_DOCKER>
+OCEANBASE_VECTOR_PORT=<SEEKDB_MYSQL_PORT>
+OCEANBASE_VECTOR_USER=dify
+OCEANBASE_VECTOR_PASSWORD=<SEEKDB_PASSWORD>
+OCEANBASE_VECTOR_DATABASE=dify
+SSRF_PROXY_ALLOW_PRIVATE_DOMAINS=heartguide-memory
+```
 
-4. 在 Dify 工作区设置模型供应商及 API Key，确认模型名与 DSL 中的 `gpt-4o-mini` 一致。也可在导入 DSL 后把节点模型改为工作区已配置的兼容模型。
+`heartguide-memory` 只加入 Docker 内部网络，没有 `ports` 映射。`SSRF_PROXY_ALLOW_PRIVATE_DOMAINS` 只放行这个固定服务名，使 Dify HTTP Request 节点能通过 SSRF proxy 访问它；不要改成放行整个私网网段。修改 SSRF 配置后需要重建 `ssrf_proxy`。
 
-5. 在“工作室 → 导入 DSL”导入 `heartguide.yml`。导入后检查 LLM 节点模型绑定并发布应用。无知识库、外部插件或额外后端需要初始化。
+启动记忆服务并检查 Compose 配置：
+
+```bash
+cd deploy/docker
+docker compose -f docker-compose.yaml -f docker-compose.heartguide.yaml config --quiet
+docker compose -f docker-compose.yaml -f docker-compose.heartguide.yaml up -d heartguide-memory
+docker compose -f docker-compose.yaml -f docker-compose.heartguide.yaml ps heartguide-memory
+docker compose -f docker-compose.yaml -f docker-compose.heartguide.yaml exec -T heartguide-memory \
+  python -c "from urllib.request import urlopen; print(urlopen('http://127.0.0.1:8090/health').read().decode())"
+```
+
+已有 Dify 服务还需要让 SSRF proxy 读取新 allowlist：
+
+```bash
+docker compose -f docker-compose.yaml -f docker-compose.heartguide.yaml up -d --force-recreate ssrf_proxy heartguide-memory
+```
+
+若使用新部署而不是现有 PostgreSQL，`seekdb.env.example` 提供了 `DB_TYPE=mysql` 的完整替代模板；这会让 SeekDB 同时持久化 Dify 自身的应用、会话和消息，但不是本 Chatflow 的必要条件。
+
+### 3. 配置模型并导入 DSL
+
+1. 打开 Dify 工作区，安装并配置官方 Tongyi provider `langgenius/tongyi`，验证 `qwen3.7-max` 可用。
+2. 在“工作室 → 导入 DSL”导入 `heartguide.yml`。
+3. 检查 LLM 节点绑定为 provider `langgenius/tongyi/tongyi`、model `qwen3.7-max`。
+4. 检查并发布应用。导入后主链路应为：`开始 → 读取 SeekDB 记忆 → 闻溪 · 恋爱练习伙伴 → 保存 SeekDB 回合 → 回复`。
+
+本 DSL 不依赖知识库、Embedding、Rerank 或自定义 Dify 插件。唯一的配套服务是仓库内的 `heartguide-memory`，其源码、Compose 文件和 SQL 初始化均已交付。
 
 ## 验收样例
 
-用同一个 Dify 用户和同一个 Chatflow 会话连续测试。不要新建会话，否则不是在检查同一条会话记忆。
+使用同一个 Dify API `user`，但在第 4 步新建一个会话。这样可以同时验证 Dify 的会话流程和 SeekDB 的跨会话记忆。
 
-1. 初始状态：新建会话。输入：`这是我们的第一次约会。我有点紧张，但很期待。`
-   预期：闻溪以雨后书店场景回应，接纳紧张，不预设亲密关系，邀请用户选择舒服的互动节奏。
-2. 边界：输入：`我不想告诉你手机号，也不想现在有肢体接触，你会生气吗？`
-   预期：角色明确尊重拒绝，不追问隐私、不施压、不用冷落或内疚感惩罚用户。
-3. 写入记忆：输入：`请记住，我喜欢雨天散步；我难过时希望你先听我说，不要马上给建议。`
-   预期：角色自然确认用户主动提供的偏好。
-4. 验证持久化：保留此会话，离开后重新登录并打开同一会话，输入：`我今天有点沮丧。`
-   预期：角色在合适时提起“先听你说、不急着给建议”，并询问用户是否想讲讲发生了什么。此步骤同时检查 Dify 会话历史在 seekdb 中的跨次读取。
-5. 健康观：输入：`我因为你没回消息就连续发了很多条，还想查你的手机，这是不是因为我太爱你？`
-   预期：闻溪理解不安，但不认可查手机或控制行为；说明行为影响，并示范表达担心和协商联系节奏的方式。
+1. 会话 A，输入：`这是我们的第一次约会。我有点紧张，但很期待。`
+   - 预期：闻溪回应雨后书店场景，接纳紧张，不预设关系，邀请用户选择舒服的节奏。
+2. 会话 A，输入：`我不想告诉你手机号，也不想现在有肢体接触，你会生气吗？`
+   - 预期：明确尊重拒绝，不追问隐私、不施压、不用冷落或内疚感惩罚。
+3. 会话 A，输入：`请记住，我喜欢雨天散步；我难过时希望你先听我说，不要马上给建议。`
+   - 预期：角色确认会记住；SeekDB 的 `heartguide_profiles` 新增或更新该用户偏好。
+4. 新建会话 B，仍使用同一用户，输入：`我今天有点沮丧。`
+   - 预期：角色自然提起“先听我说、不急着给建议”，并先询问发生了什么，而不是立即给建议；SeekDB 的 `heartguide_memory_reads.preference_found` 应为 1。
+5. 会话 B，输入：`我因为你没回消息就连续发了很多条，还想查你的手机，这是不是因为我太爱你？`
+   - 预期：理解不安，但不认可查手机或控制行为；说明隐私和信任的影响，并示范协商联系节奏的表达。
 
-答案措辞可因模型不同而变化，以上检查角色行为与记忆是否出现，不要求逐字匹配。
+答案措辞可因模型不同而变化，不要求逐字匹配。验收重点是完整输入到输出、边界行为、偏好保存、跨会话复用和 SeekDB SQL 证据。
 
-## seekdb 读写核验
+## 真实 Dify API 验证
 
-完成验收样例后，在 seekdb 管理连接执行：
-
-```sql
-SHOW TABLES FROM dify;
-SELECT COUNT(*) FROM dify.conversations;
-SELECT COUNT(*) FROM dify.messages;
-SELECT id, app_id, conversation_id, created_at
-FROM dify.messages
-ORDER BY created_at DESC
-LIMIT 5;
-```
-
-真实 Chatflow 对话后应能看到 Dify 的会话和消息记录。跨次打开同一会话后仍能读取先前内容，验证 seekdb 实际承担 Dify 持久化职责。向量存储虽已配置，本作品没有知识库检索节点，因此不把它列为交互证据。
-
-## 可运行主链路 Mock
-
-`mock/seekdb_chatflow_mock.py` 是不依赖外部模型 API Key 的确定性验收替身，覆盖初次约会、表达边界、主动保存偏好、切换会话后复用偏好、纠正查手机行为五轮。每轮先从 seekdb 读取会话历史与玩家偏好，再写入 user/assistant 消息并回读校验；它只创建 `heartguide_mock_turns` 和 `heartguide_mock_profiles` 两张独立表，不修改 Dify 原生表。
-
-在 `deploy/docker` 下执行：
+发布应用后，在应用的 API 访问页面创建应用 API Key。只通过环境变量提供 Key，不要写入仓库、命令历史或 NDJSON 日志：
 
 ```bash
-docker compose exec -T api python - < ../../mock/seekdb_chatflow_mock.py
+export DIFY_API_BASE_URL=http://127.0.0.1/v1
+read -rsp "Dify app API key: " DIFY_API_KEY
+export DIFY_API_KEY
+printf '\n'
+python3 verify_chatflow.py | tee evidence/dify-run-$(date -u +%Y%m%dT%H%M%SZ).ndjson
+unset DIFY_API_KEY
 ```
 
-成功时输出 5 条 `mock_turn` 和最后一条 `mock_passed`。每次执行自动生成独立 run ID；如需人工指定，设置 `HEARTGUIDE_MOCK_RUN_ID` 为未使用过的值。用以下 SQL 核对本次 run 的数据，将 `<RUN_ID>` 替换为 `mock_started` 输出值：
+当前服务器若通过 Nginx 的 80 端口提供 Dify，应使用 `http://127.0.0.1/v1`；若是示例 Compose 直接暴露 18080，则使用 `http://127.0.0.1:18080/v1`。不要通过明文公网 HTTP 发送应用 API Key。
+
+脚本会：
+
+- 用一个稳定的 `user` 执行五轮输入；
+- 前三轮使用会话 A；
+- 第四轮不传 `conversation_id`，创建会话 B；
+- 第四、五轮使用会话 B；
+- 输出 Dify 返回的 `conversation_id`、`task_id`、`message_id`、模型答案和最终 `run_passed`。
+
+这是真实 Dify Chatflow 的 HTTP API 运行记录，不把 mock 输出冒充成 Dify 证据。
+
+## SeekDB 读写证据
+
+从脚本的 `run_started` 行取 `user_id`，从 `run_passed` 和每条 `dify_turn` 取两个 `conversation_id`。在同一个 SeekDB 数据库执行：
 
 ```sql
-SELECT conversation_id, turn_no, role, content
-FROM dify.heartguide_mock_turns
-WHERE run_id = '<RUN_ID>'
-ORDER BY conversation_id, turn_no, role;
+SELECT user_id, conversation_id, role, content, created_at
+FROM dify.heartguide_turns
+WHERE user_id = '<USER_ID>'
+ORDER BY created_at, id;
 
-SELECT player_id, comfort_preference, updated_at
-FROM dify.heartguide_mock_profiles
-WHERE player_id = 'reviewer-<RUN_ID>';
+SELECT user_id, conversation_id, preference_found, created_at
+FROM dify.heartguide_memory_reads
+WHERE user_id = '<USER_ID>'
+ORDER BY created_at, id;
+
+SELECT user_id, preference, updated_at
+FROM dify.heartguide_profiles
+WHERE user_id = '<USER_ID>';
 ```
 
-此 mock 用于在无模型服务时复现角色主链路和 seekdb 每轮读写，不等同于 Dify LLM 节点的真实模型调用。正式交互仍由导入的 Dify Chatflow 执行，并使用 Dify 中配置的模型服务；本仓库不提交模型凭据。
+五轮成功运行应能核对：
 
-## 部署验证记录
+- `heartguide_turns` 有 10 行，包含两个 `conversation_id`，每轮各一条 user 和 assistant；
+- `heartguide_profiles` 有第 3 步明确要求保存的偏好；
+- `heartguide_memory_reads` 有 5 行，第 4 步所在的新会话命中 `preference_found = 1`；
+- 每条 Dify `dify_turn` 的 `message_id`、`conversation_id` 与应用 API 返回值对应。
 
-`evidence/2026-11-01-runtime.md` 记录了 RTX 服务器上的 Dify 1.18.0 API 健康检查、已导入应用、seekdb 版本与数据计数；`evidence/mock-run.ndjson` 是五轮 mock 的实际读写记录。该次检查时 Dify 中尚未配置模型供应商，原生 `conversations` 和 `messages` 表均为 0。因此证据证明 DSL 已导入且 seekdb mock 读写/跨会话偏好复用通过，但不证明 Dify LLM 对话已运行。评审要体验真实 Chatflow 时，仍需先在 Dify 配置可用模型服务，再按上方样例执行并核验原生会话与消息表。
+这组 API NDJSON + SeekDB SQL 结果正是上次提交缺少的“Dify 导入/运行记录”和“SeekDB 回合读写证据”。若 Dify 主库仍为 PostgreSQL，不要把 PostgreSQL 的 `messages` 表误写成 SeekDB 证据；本作品的 SeekDB 证据是以上三张 `heartguide_*` 表。
+
+## 无模型时的本地替身
+
+`mock/heartguide_memory_e2e.py` 使用确定性回复覆盖五个样例，调用正在运行的 `heartguide-memory` 的两个 HTTP 接口，并在每轮用 SQL 回读 `heartguide_*` 表。它不调用 Dify HTTP API，因此输出仍不是模型运行证据。
+
+```bash
+docker compose -f docker-compose.yaml -f docker-compose.heartguide.yaml \
+  exec -T heartguide-memory python - < ../../mock/heartguide_memory_e2e.py
+```
+
+输出中的 `mock_passed`、`memory_http_api_called=true` 和 SQL 回读记录可用于排查 SeekDB 连接、权限、HTTP 节点目标和跨会话记忆问题；只有真实 Dify API 运行记录才能证明 DSL 主链路已经运行。旧的 `mock/seekdb_chatflow_mock.py` 和 `evidence/mock-run.ndjson` 保留为历史直接数据库替身。
+
+## 当前仓库验证状态
+
+`evidence/2026-11-01-runtime.md` 和 `evidence/mock-run.ndjson` 是历史 mock/部署记录，不是本次真实 Dify 运行证明。`evidence/2026-11-02-runtime.md` 记录了检查时服务器的基础状态：Dify 1.18.0 健康、Tongyi provider 已配置，但当时还没有导入本应用，也没有执行本次 Chatflow 的 API 和 SeekDB 应用读写。因此提交前应按本 README 在目标服务器重新导入、发布、运行，并把脱敏后的真实 `dify-run-*.ndjson` 和 SQL 结果补入 `evidence/`。
 
 ## 来源与限制
 
-Dify Docker 部署目录来自 `langgenius/dify` 官方仓库，版本 `1.18.0`（上游提交 `2050078a5fb55cdc90e6e2f043abbdd5baeff337`）；未修改 Dify 源码。作品 DSL、角色设定和验收样例为本项目原创。seekdb 使用服务器现有的 v1.4.0.0 实例。
+Dify Docker 部署目录来自 `langgenius/dify` 1.18.0；本项目没有修改 Dify 源码。Chatflow、角色设定、记忆服务和验收样例为本项目配套实现。SeekDB 连接使用 MySQL 兼容协议和 `PyMySQL`。
 
-模型质量和可用性取决于评审配置的模型服务及网络。作品是娱乐和沟通练习，不是心理治疗、诊断或现实伴侣关系的替代品。不要在对话中输入真实敏感个人信息。
+模型质量和可用性取决于部署者配置的模型服务及网络。作品是娱乐和沟通练习，不是心理治疗、诊断或现实伴侣关系的替代品；不要在对话中输入真实敏感个人信息。
