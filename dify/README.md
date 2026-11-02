@@ -107,6 +107,22 @@ docker compose -f docker-compose.yaml -f docker-compose.heartguide.yaml up -d --
 
 答案措辞可因模型不同而变化，不要求逐字匹配。验收重点是完整输入到输出、边界行为、偏好保存、跨会话复用和 SeekDB SQL 证据。
 
+## 运行截图
+
+以下截图来自服务器上的 Dify 应用预览，展示已导入的 Chatflow 主链路和实际对话输出。截图用于辅助说明体验流程；完整验收仍应按上文步骤执行，并以真实 Dify API 运行记录和 SeekDB SQL 回读结果为准。
+
+**Dify Chatflow 主链路：读取记忆 → Qwen 回复 → 保存回合 → 回复**
+
+![Dify Chatflow 主链路](evidence/screenshots/01-chatflow-topology.png)
+
+**预览：首次约会输入与闻溪回复**
+
+![Dify 预览首次交互](evidence/screenshots/02-preview-first-turn.png)
+
+**预览：连续互动与第二轮回复**
+
+![Dify 预览后续交互](evidence/screenshots/03-preview-follow-up.png)
+
 ## 真实 Dify API 验证
 
 发布应用后，在应用的 API 访问页面创建应用 API Key。只通过环境变量提供 Key，不要写入仓库、命令历史或 NDJSON 日志：
