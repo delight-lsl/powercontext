@@ -40,7 +40,7 @@ openssl rand -hex 24
 mysql -h <SEEKDB_HOST> -P <SEEKDB_PORT> -uroot -p < init_seekdb.sql
 ```
 
-如果服务器已有专用 SeekDB 用户和数据库，保留已有账号并单独执行文件中的三段 `CREATE TABLE` 语句；运行服务使用的账号必须拥有 `dify` 数据库这三张表的读写权限。
+如果服务器已有专用 SeekDB 用户和数据库，保留已有账号并单独执行文件中的三段 `CREATE TABLE` 语句；先把语句中的 `dify` 替换为实际使用的数据库名。运行服务使用的账号必须拥有该数据库这三张表的读写权限。
 
 ### 2. 配置 Dify Compose
 
@@ -129,21 +129,23 @@ unset DIFY_API_KEY
 
 ## SeekDB 读写证据
 
-从脚本的 `run_started` 行取 `user_id`，从 `run_passed` 和每条 `dify_turn` 取两个 `conversation_id`。在同一个 SeekDB 数据库执行：
+从脚本的 `run_started` 行取 `user_id`，从 `run_passed` 和每条 `dify_turn` 取两个 `conversation_id`。在记忆服务实际使用的同一个 SeekDB 数据库执行。数据库名取自 `OCEANBASE_VECTOR_DATABASE`；例如目标服务器当前配置为 `test`，查询对象就是 `test.heartguide_*`，不是固定的 `dify.heartguide_*`：
 
 ```sql
+USE <SEEKDB_DATABASE>;
+
 SELECT user_id, conversation_id, role, content, created_at
-FROM dify.heartguide_turns
+FROM heartguide_turns
 WHERE user_id = '<USER_ID>'
 ORDER BY created_at, id;
 
 SELECT user_id, conversation_id, preference_found, created_at
-FROM dify.heartguide_memory_reads
+FROM heartguide_memory_reads
 WHERE user_id = '<USER_ID>'
 ORDER BY created_at, id;
 
 SELECT user_id, preference, updated_at
-FROM dify.heartguide_profiles
+FROM heartguide_profiles
 WHERE user_id = '<USER_ID>';
 ```
 

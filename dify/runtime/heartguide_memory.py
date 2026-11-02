@@ -4,6 +4,7 @@ import re
 import sys
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs
 
 
 MAX_BODY_BYTES = 256 * 1024
@@ -153,6 +154,31 @@ def write_turn(user_id, conversation_id, user_message, assistant_message):
         connection.close()
 
 
+def parse_payload(body, content_type):
+    media_type = content_type.split(";", 1)[0].strip().lower()
+    if media_type == "application/x-www-form-urlencoded":
+        try:
+            values = parse_qs(
+                body.decode("utf-8"),
+                keep_blank_values=True,
+                strict_parsing=True,
+            )
+        except (UnicodeDecodeError, ValueError):
+            raise ValueError("invalid_form") from None
+        return {key: items[-1] for key, items in values.items() if items}
+
+    if media_type in ("", "application/json"):
+        try:
+            payload = json.loads(body)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            raise ValueError("invalid_json") from None
+        if not isinstance(payload, dict):
+            raise ValueError("invalid_json")
+        return payload
+
+    raise ValueError("unsupported_content_type")
+
+
 class MemoryHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path != "/health":
@@ -214,13 +240,10 @@ class MemoryHandler(BaseHTTPRequestHandler):
             raise ValueError("invalid_content_length") from None
         if length <= 0 or length > MAX_BODY_BYTES:
             raise ValueError("invalid_content_length")
-        try:
-            payload = json.loads(self.rfile.read(length))
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            raise ValueError("invalid_json") from None
-        if not isinstance(payload, dict):
-            raise ValueError("invalid_json")
-        return payload
+        return parse_payload(
+            self.rfile.read(length),
+            self.headers.get("Content-Type", ""),
+        )
 
     def _respond(self, status, body, content_type):
         encoded = body.encode("utf-8")

@@ -69,13 +69,15 @@ workflow:
             type: no-auth
           body:
             data:
-              - key: ""
+              - key: user_id
                 type: text
-                value: |
-                  {"user_id": {{#sys.user_id#}}, "conversation_id": {{#sys.conversation_id#}}}
-            type: json
+                value: "{{#sys.user_id#}}"
+              - key: conversation_id
+                type: text
+                value: "{{#sys.conversation_id#}}"
+            type: x-www-form-urlencoded
           desc: "从 SeekDB 读取该用户明确保存的跨会话偏好"
-          headers: "Content-Type: application/json"
+          headers: "Content-Type: application/x-www-form-urlencoded"
           method: post
           params: ""
           retry_config:
@@ -158,13 +160,21 @@ workflow:
             type: no-auth
           body:
             data:
-              - key: ""
+              - key: user_id
                 type: text
-                value: |
-                  {"user_id": {{#sys.user_id#}}, "conversation_id": {{#sys.conversation_id#}}, "user_message": {{#sys.query#}}, "assistant_message": {{#wenxi.text#}}}
-            type: json
+                value: "{{#sys.user_id#}}"
+              - key: conversation_id
+                type: text
+                value: "{{#sys.conversation_id#}}"
+              - key: user_message
+                type: text
+                value: "{{#sys.query#}}"
+              - key: assistant_message
+                type: text
+                value: "{{#wenxi.text#}}"
+            type: x-www-form-urlencoded
           desc: "将本轮问答及用户明确要求记住的偏好写入 SeekDB"
-          headers: "Content-Type: application/json"
+          headers: "Content-Type: application/x-www-form-urlencoded"
           method: post
           params: ""
           retry_config:
