@@ -1,3 +1,17 @@
+# Copyright (c) 2026 OceanBase.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Artifact-native Memory domain and service contracts."""
 
 from powercontext.builtin.artifacts.memory.errors import (
@@ -7,9 +21,11 @@ from powercontext.builtin.artifacts.memory.errors import (
     InvalidMemoryCitationError,
     InvalidMemoryEvidenceError,
     MemoryBackendConfigurationError,
+    MemoryCapacityExceededError,
     MemoryEntryInactiveError,
     MemoryEntryNotFoundError,
     MemoryLayerError,
+    MemoryWriteRejectedError,
 )
 from powercontext.builtin.artifacts.memory.extraction import (
     DefaultMemoryEvidenceProjector,
@@ -27,10 +43,15 @@ from powercontext.builtin.artifacts.memory.models import (
     EmbeddingProfile,
     Memory,
     MemoryCapabilities,
+    MemoryCapacity,
+    MemoryCapacityBudget,
+    MemoryCapacityDimension,
     MemoryChange,
     MemoryChangeOp,
     MemoryChannelHit,
     MemoryCitation,
+    MemoryCompactionPolicy,
+    MemoryCompactionResult,
     MemoryContent,
     MemoryEntryInput,
     MemoryEntryState,
@@ -39,6 +60,7 @@ from powercontext.builtin.artifacts.memory.models import (
     MemoryManifest,
     MemoryManifestEntry,
     MemoryMatchedBy,
+    MemoryQueryEmbedding,
     MemoryRerankTrace,
     MemoryRevisionChanges,
     MemorySearchMode,
@@ -63,7 +85,12 @@ from powercontext.builtin.artifacts.memory.protocols import (
     MemorySearchChannels,
     MemorySearchRequest,
     MemoryUnitOfWork,
+    MemoryWriteAssessment,
+    MemoryWriteGate,
+    MemoryWriteGateRequest,
     MemoryWritePlan,
+    MemoryWriteRejectionCode,
+    MemoryWriteVerdict,
 )
 from powercontext.builtin.artifacts.memory.reranking import (
     MEMORY_RERANK_INSTRUCTIONS,
@@ -101,11 +128,17 @@ __all__ = [
     "MemoryBackendConfigurationError",
     "MemoryCandidateRequest",
     "MemoryCapabilities",
+    "MemoryCapacity",
+    "MemoryCapacityBudget",
+    "MemoryCapacityDimension",
+    "MemoryCapacityExceededError",
     "MemoryChange",
     "MemoryChangeOp",
     "MemoryChannelHit",
     "MemoryCitation",
     "MemoryCommit",
+    "MemoryCompactionPolicy",
+    "MemoryCompactionResult",
     "MemoryContent",
     "MemoryEntryInactiveError",
     "MemoryEntryInput",
@@ -126,6 +159,7 @@ __all__ = [
     "MemoryManifestEntry",
     "MemoryMatchedBy",
     "MemoryProjection",
+    "MemoryQueryEmbedding",
     "MemoryRememberMode",
     "MemoryRerankCandidate",
     "MemoryRerankDecision",
@@ -142,7 +176,13 @@ __all__ = [
     "MemoryService",
     "MemoryUnitOfWork",
     "MemoryUsedSearchMode",
+    "MemoryWriteAssessment",
+    "MemoryWriteGate",
+    "MemoryWriteGateRequest",
     "MemoryWritePlan",
+    "MemoryWriteRejectedError",
+    "MemoryWriteRejectionCode",
+    "MemoryWriteVerdict",
     "memory_extraction_instructions",
     "memory_extraction_instructions_version",
 ]

@@ -1,10 +1,44 @@
+# Copyright (c) 2026 OceanBase.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Repository-wide pytest collection controls."""
 
+from collections.abc import Iterator
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import pytest
 
 _REAL_E2E_ROOT = Path(__file__).parent / "e2e" / "real_experience_skill"
+
+
+@pytest.fixture
+def short_tmp_path() -> Iterator[Path]:
+    """Leave room for nested checkout caches and backup names on Windows."""
+    # pytest's user/session/test-name directories can exhaust MAX_PATH before
+    # the fixture's cache, commit hash, and plugin files have been appended.
+    with TemporaryDirectory(prefix="pc-") as directory:
+        yield Path(directory)
+
+
+@pytest.fixture(autouse=True)
+def isolated_client_connection_settings(tmp_path, monkeypatch, request):
+    """Never consume or overwrite the developer's persistent setup consent."""
+
+    if not request.config.getoption("run_real_e2e"):
+        monkeypatch.setenv("POWERCONTEXT_CLIENT_CONFIG_FILE", str(tmp_path / "client-settings.json"))
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-home"))
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:

@@ -1,3 +1,17 @@
+# Copyright (c) 2026 OceanBase.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Errors owned by the built-in Memory Artifact Family."""
 
 from powercontext.errors import PowerContextError
@@ -5,6 +19,14 @@ from powercontext.errors import PowerContextError
 
 class MemoryLayerError(PowerContextError):
     """Base exception for Memory domain and repository failures."""
+
+
+class MemoryCapacityExceededError(MemoryLayerError, RuntimeError):
+    def __init__(self, dimension: str, limit: int, observed: int) -> None:
+        self.dimension = dimension
+        self.limit = limit
+        self.observed = observed
+        super().__init__(f"memory capacity budget is exceeded: {dimension} {observed} > {limit}")
 
 
 class CapabilityNotSupportedError(MemoryLayerError, RuntimeError):
@@ -34,9 +56,16 @@ class MemoryEntryInactiveError(MemoryEntryError, RuntimeError):
 
 
 class InvalidMemoryCandidateError(MemoryLayerError, ValueError):
-    def __init__(self, code: str, detail: object | None = None) -> None:
+    def __init__(
+        self,
+        code: str,
+        detail: object | None = None,
+        *,
+        canonical_code: str | None = None,
+    ) -> None:
         self.code = code
         self.detail = detail
+        self.canonical_code = canonical_code
         messages = {
             "remember-mode": f"unsupported memory remember mode: {detail}",
             "identity-kind": f"unsupported memory identity kind: {detail}",
@@ -79,6 +108,20 @@ class InvalidMemoryCitationError(MemoryLayerError, ValueError):
             "expand-anchor": "invalid memory citation anchor",
         }
         super().__init__(messages.get(code, f"invalid memory citation: {code}"))
+
+
+class MemoryWriteRejectedError(MemoryLayerError, RuntimeError):
+    """A structured, caller-visible refusal to apply one Memory write.
+
+    ``code`` and ``reason`` carry the gate's decision to the host, so a refused write is
+    observable rather than silently dropped.
+    """
+
+    def __init__(self, code: str, reason: str | None = None) -> None:
+        self.code = code
+        self.reason = reason
+        detail = "" if reason is None else f": {reason}"
+        super().__init__(f"memory write was rejected ({code}){detail}")
 
 
 class MemoryBackendConfigurationError(MemoryLayerError, RuntimeError):

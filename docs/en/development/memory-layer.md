@@ -71,6 +71,80 @@ revised = await memory.revise(
 `retire()` marks an entry inactive without deleting immutable content. `changes()` returns compact revision changes.
 Expected revisions and citations preserve optimistic concurrency without requiring callers to rebuild references.
 
+## Capacity and tombstone compaction
+
+`await runtime.memory.for_scope(scope_id).capacity()` reports the current head's active entries, total manifest
+entries, exact canonical content bytes, eligible tombstones, budget, and exceeded dimensions. The direct service
+method `await service.capacity(memory)` measures the exact Revision supplied. Remote callers use
+`POST /v1/memory/capacity` with `{"scope_id": "project-alpha"}`, or
+`PowerContextClient.get_memory_capacity(GetMemoryCapacityRequest(scope_id="project-alpha"))`.
+A Scope without a Memory returns 404; reading capacity does not create one.
+MCP exposes the same read as `get_memory_capacity`, with read-only and idempotent annotations.
+Tombstone eligibility can load complete manifests across the configured recovery window (10 Revisions by default),
+in addition to reading the target Revision. Read and decode cost scales with their combined size. Use this operation
+for explicit capacity inspection, not frequent polling; it is not a constant-cost counter.
+
+`RuntimeConfig` supplies deployment-wide defaults:
+
+| Setting | Default |
+| --- | --- |
+| `memory_max_active_entries` | 5,000 |
+| `memory_max_manifest_entries` | 10,000 |
+| `memory_max_manifest_bytes` | 4,194,304 |
+| `memory_compaction_enabled` | `False` |
+| `memory_compaction_min_tombstone_revisions` | 10 |
+| `memory_max_history_revisions` | 100 |
+
+The capacity defaults bound growth of each Revision; they do not guarantee append latency or cap total database size.
+Retained historical manifests keep accumulating. Tune deployment budgets against representative backend measurements.
+
+Active-entry limits cannot exceed manifest-entry limits. Explicit writes, extraction, and generic Artifact management
+share the budget. A write is refused only when it exceeds a limit and increases that dimension relative to the base.
+The deterministic priority is bytes, manifest entries, then active entries. HTTP returns
+`409 memory_capacity_exceeded` with `dimension`, `limit`, and `observed`; the rejected write persists no content.
+`manifest_bytes` includes the complete canonical Revision content, including its changes and reasons.
+
+`forget()` and `organize()` remain available over budget. `reactivate()` checks active-entry growth only.
+Compaction removes aged, untagged inactive entries from the current manifest. Set
+`RuntimeConfig(memory_compaction_enabled=True)` when constructing the Runtime to permit explicit in-process commits.
+This flag does not schedule or automatically trigger compaction. Call the scoped Runtime entry point to preview and
+commit, using the preview's Revision to reject a head that has changed:
+
+```python
+scoped = runtime.memory.for_scope(scope_id)
+preview = await scoped.compact(dry_run=True, limit=100)
+result = await scoped.compact(limit=100, expected_revision=preview.memory.revision)
+```
+
+Direct service callers can construct `MemoryService` with `MemoryCompactionPolicy(enabled=True)` and call
+`service.compact(memory, ...)` against an exact Memory Revision. No HTTP, MCP, or CLI compaction operation is provided.
+
+A preview works while compaction is disabled and writes no Revision. Eligibility counts completed Revision advances:
+an entry deactivated at Revision 2 qualifies at Revision 12 with the default age of 10. Reactivation and a subsequent
+deactivation restart the window. Only this recent window is read. No-op maintenance does not advance the Revision;
+if every tombstone is too recent, explicitly configure `memory_compaction_min_tombstone_revisions=0` (or
+`MemoryCompactionPolicy(enabled=True, min_tombstone_revisions=0)`) to preview and compact immediately. Zero bypasses
+only the recovery window: active entries and tagged tombstones remain protected. Keep the default window unless
+immediate recovery is needed, because a compacted entry cannot be reactivated.
+Tags protect inactive entries; a tag added during compaction aborts the transaction with
+`CapabilityNotSupportedError("compaction-tag-conflict")` so the caller can preview again.
+
+Compaction preserves all entry bodies, prior Revisions, and exact citations. A removed entry cannot be reactivated or
+listed in the current manifest. Each removal records the additive `compact` change operation; update consumers that
+exhaustively enumerate change operations before enabling compaction. Compaction is available in process only.
+`reclaimed_bytes` is the signed difference between complete canonical contents. New audit records or a long reason
+can outweigh a small directory reduction; subsequent revisions no longer carry those compaction records.
+
+`MemoryService.revisions(memory, since_revision=0, through_revision=None)` reads the interval
+`(since_revision, through_revision]`, defaulting to the current head as the upper bound. It refuses intervals longer
+than `memory_max_history_revisions` with `CapabilityNotSupportedError("history-window")` before expanding them.
+For example, `through_revision=1` still reads the first Revision of a Memory with more than 100 Revisions, and
+`since_revision=100, through_revision=200` reads its next 100. Results are never silently truncated.
+The default 100 Revisions can already contain about 400 MiB of
+canonical content near the 4 MiB budget, before object overhead. This is a read fan-out bound, not a hard memory limit;
+lowered budgets and relief operations can leave Revisions above the byte budget. Increase the configurable history
+limit only when the caller can afford the complete snapshots. This bound does not paginate `entries()` or `changes()`.
+
 ## Search, expand, and cite
 
 SQLite and OceanBase both initialize a full-text index, so either database can search without an embedding model:
@@ -90,20 +164,14 @@ the same citation fields through list and exact-read operations.
 unavailable. Explicit `vector` and `hybrid` requests fail when the configured profile does not provide that
 capability.
 
-## Enable SQLite Vec1
+## Enable SQLite vector search
 
-SQLite vector search is enabled only when both a Vec1 0.7 or newer loadable extension and an embedding model are
-supplied. PowerContext does not install or build the native extension; provide a compatible library for the target
-operating system and architecture:
+SQLite vector search is enabled when an embedding model is supplied. The `powercontext[builtin]` extra bundles
+`sqlite-vec`, so no extension path or separate native-library installation is required:
 
 ```python
-from pathlib import Path
-
 config = BuiltinConfig(
-    database=SQLiteConfig(
-        url="sqlite+aiosqlite:///powercontext.db",
-        vec1_extension=Path("/opt/sqlite-extensions/vec1"),
-    )
+    database=SQLiteConfig(url="sqlite+aiosqlite:///powercontext.db")
 )
 async with open_builtin_runtime(
     config,
@@ -112,7 +180,7 @@ async with open_builtin_runtime(
     ...
 ```
 
-The SQLite profile composes FTS5 and Vec1 strategies. It reports `fts`, `vector`, and `hybrid` through Memory
+The SQLite profile composes FTS5 and sqlite-vec strategies. It reports `fts`, `vector`, and `hybrid` through Memory
 capabilities.
 Stored projections and query vectors must use the same `EmbeddingProfile`, including model name, dimension, distance,
 and normalization. Changing that profile requires rebuilding projections before vector search resumes.
@@ -145,7 +213,7 @@ async with open_builtin_runtime(
 
 The OceanBase profile uses the same index composition as SQLite. Its full-text strategy is always available. Supplying
 an embedding model adds a `VECTOR` projection and HNSW strategy, enabling `vector` and `hybrid` modes. SQLite FTS5 and
-OceanBase FULLTEXT therefore serve the same Runtime and Server search calls; Vec1 and HNSW do the same for vector
+OceanBase FULLTEXT therefore serve the same Runtime and Server search calls; sqlite-vec and HNSW do the same for vector
 search.
 
 ## Operational checks
@@ -155,7 +223,7 @@ Before serving requests, verify:
 - the selected profile opens and initializes successfully;
 - each tenant or project maps to the intended scope ID;
 - scheduled extraction has a candidate pipeline;
-- Vec1 configuration includes a matching embedding model;
+- SQLite vector search has a matching embedding model;
 - OceanBase vector search has a matching embedding model;
 - capability responses match the indexes actually initialized;
 - database and scheduler resources close with the process lifecycle.

@@ -1,19 +1,34 @@
+# Copyright (c) 2026 OceanBase.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Application service for one scoped external Skill Registry projection."""
 
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 from powercontext.builtin.artifacts.skill.external import (
-    MAX_EXTERNAL_SKILL_MANIFEST_BYTES,
+    CapturedExternalSkillPackage,
     ExternalSkillNotFoundError,
     ExternalSkillProvider,
     ExternalSkillProviderScan,
     ExternalSkillResolution,
     ExternalSkillResolutionStatus,
-    ExternalSkillSnapshot,
     ExternalSkillSnapshotUnavailableError,
 )
+from powercontext.builtin.artifacts.skill.package import SkillPackageError, capture_skill_directory
 from powercontext.builtin.persistence.database import AsyncDatabase
 from powercontext.builtin.persistence.errors import RepositoryNotFoundError
 from powercontext.builtin.persistence.external_skills import ExternalSkillRepository
@@ -37,14 +52,19 @@ class ExternalSkillRegistryService:
 
     async def scan(self) -> ExternalSkillProviderScan:
         snapshot = await asyncio.to_thread(self._provider.scan)
+        provider_names = getattr(self._provider, "provider_names", (self._provider.name,))
         async with self._database.transaction() as connection:
-            await self._repository.replace(
-                connection,
-                self._scope_id,
-                self._provider.name,
-                self._provider.host_id,
-                snapshot.registrations,
-            )
+            for provider_name in provider_names:
+                registrations = tuple(
+                    registration for registration in snapshot.registrations if registration.provider == provider_name
+                )
+                await self._repository.replace(
+                    connection,
+                    self._scope_id,
+                    provider_name,
+                    self._provider.host_id,
+                    registrations,
+                )
         return snapshot
 
     async def list(self, /, *, include_unavailable: bool = False) -> tuple[ExternalSkillResolution, ...]:
@@ -82,28 +102,20 @@ class ExternalSkillRegistryService:
         external_skill_id: str,
         fingerprint: str,
         /,
-    ) -> ExternalSkillSnapshot:
-        """Capture exact primary content only while the whole package fingerprint is stable."""
+    ) -> CapturedExternalSkillPackage:
+        """Capture a complete canonical package while the external fingerprint is stable."""
 
         resolution = await self.resolve(external_skill_id, fingerprint)
         if resolution.status is not ExternalSkillResolutionStatus.AVAILABLE or resolution.entrypoint is None:
             raise ExternalSkillSnapshotUnavailableError(external_skill_id)
         try:
-            manifest = await asyncio.to_thread(_read_manifest, resolution.entrypoint)
-        except (OSError, UnicodeError, ValueError):
+            package = await asyncio.to_thread(capture_skill_directory, Path(resolution.entrypoint).parent)
+        except (OSError, UnicodeError, SkillPackageError):
             raise ExternalSkillSnapshotUnavailableError(external_skill_id) from None
         confirmed = await self.resolve(external_skill_id, fingerprint)
         if confirmed.status is not ExternalSkillResolutionStatus.AVAILABLE:
             raise ExternalSkillSnapshotUnavailableError(external_skill_id)
-        return ExternalSkillSnapshot(registration=resolution.registration, manifest=manifest)
-
-
-def _read_manifest(entrypoint: str) -> str:
-    with open(entrypoint, "rb") as stream:
-        content = stream.read(MAX_EXTERNAL_SKILL_MANIFEST_BYTES + 1)
-    if len(content) > MAX_EXTERNAL_SKILL_MANIFEST_BYTES:
-        raise ValueError("external Skill manifest exceeds the snapshot bound")  # noqa: TRY003
-    return content.decode("utf-8")
+        return CapturedExternalSkillPackage(registration=resolution.registration, package=package)
 
 
 __all__ = ["ExternalSkillRegistryService"]

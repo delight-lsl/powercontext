@@ -1,3 +1,17 @@
+# Copyright (c) 2026 OceanBase.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import asyncio
 from pathlib import Path
 from typing import cast
@@ -56,24 +70,23 @@ def test_http_sdk_external_skill_registry_preserves_host_local_authority(tmp_pat
                 base_url="http://testserver",
             ) as transport,
         ):
-            client = PowerContextClient("http://testserver", http_client=transport)
+            client = PowerContextClient("http://testserver", http_client=transport, trust_transport_security=True)
             capabilities = await client.get_capabilities()
             assert capabilities.external_skill_registry is True
             assert capabilities.managed_skill_generation is False
+            scope_id = (await client.get_default_scope()).scope_id
 
-            scan = await client.scan_external_skills(ScanExternalSkillsRequest(scope_id="project:example"))
+            scan = await client.scan_external_skills(ScanExternalSkillsRequest(scope_id=scope_id))
             registration = scan.registrations[0]
-            available = await client.list_external_skills(ListExternalSkillsRequest(scope_id="project:example"))
+            available = await client.list_external_skills(ListExternalSkillsRequest(scope_id=scope_id))
             assert available.skills[0].entrypoint == str(manifest)
 
             manifest.write_text(manifest.read_text(encoding="utf-8") + "Changed.\n", encoding="utf-8")
 
-            assert (
-                await client.list_external_skills(ListExternalSkillsRequest(scope_id="project:example"))
-            ).skills == []
+            assert (await client.list_external_skills(ListExternalSkillsRequest(scope_id=scope_id))).skills == []
             stale = await client.resolve_external_skill(
                 ResolveExternalSkillRequest(
-                    scope_id="project:example",
+                    scope_id=scope_id,
                     external_skill_id=registration.external_skill_id,
                     fingerprint=registration.fingerprint,
                 )
@@ -117,14 +130,15 @@ def test_http_sdk_explicitly_imports_exact_external_snapshot_into_review(tmp_pat
                 transport=httpx.ASGITransport(app=app),
                 base_url="http://testserver",
             ) as transport:
-                client = PowerContextClient("http://testserver", http_client=transport)
+                client = PowerContextClient("http://testserver", http_client=transport, trust_transport_security=True)
+                scope_id = (await client.get_default_scope()).scope_id
                 registration = (
-                    await client.scan_external_skills(ScanExternalSkillsRequest(scope_id="project:example"))
+                    await client.scan_external_skills(ScanExternalSkillsRequest(scope_id=scope_id))
                 ).registrations[0]
 
                 imported = await client.import_external_skill(
                     ImportExternalSkillRequest(
-                        scope_id="project:example",
+                        scope_id=scope_id,
                         external_skill_id=registration.external_skill_id,
                         fingerprint=registration.fingerprint,
                         mode=ExternalSkillImportMode.IMPORT,

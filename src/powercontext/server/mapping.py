@@ -1,16 +1,45 @@
+# Copyright (c) 2026 OceanBase.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Map HTTP transport values to the runtime application boundary."""
 
 from __future__ import annotations
 
 from typing import Any
 
+from pydantic import ValidationError
+
 from powercontext.artifacts import ArtifactRef
-from powercontext.builtin.artifacts.experience import Experience, ExperienceContent
+from powercontext.builtin.artifacts.experience import (
+    Experience,
+    ExperienceContent,
+    FailureRecord,
+    FailureSignature,
+    FailureVerification,
+)
 from powercontext.builtin.artifacts.handoff import HandoffCitation as RuntimeHandoffCitation
+from powercontext.builtin.artifacts.handoff.generation_metadata import (
+    HandoffGenerationEnvelope,
+    HandoffGenerationMetadata,
+)
+from powercontext.builtin.artifacts.profile.models import ProfileCandidateProposal as RuntimeProfileCandidateProposal
+from powercontext.builtin.artifacts.profile.models import ProfileWriteContent as RuntimeProfileWriteContent
 from powercontext.builtin.artifacts.skill import (
     ExternalSkillProviderScan,
     Skill,
     SkillContent,
+    SkillPackageRef,
 )
 from powercontext.builtin.artifacts.skill import (
     ExternalSkillRegistration as RuntimeExternalSkillRegistration,
@@ -18,6 +47,8 @@ from powercontext.builtin.artifacts.skill import (
 from powercontext.builtin.artifacts.skill import (
     ExternalSkillResolution as RuntimeExternalSkillResolution,
 )
+from powercontext.builtin.artifacts.topic_memory import PublishedTopicMemory, TopicMemorySearchResult
+from powercontext.builtin.persistence.artifact_governance import ArtifactGovernance
 from powercontext.builtin.review import ArtifactCandidate as RuntimeArtifactCandidate
 from powercontext.builtin.review import ArtifactCandidatePage as RuntimeArtifactCandidatePage
 from powercontext.builtin.review import CandidateStatus as RuntimeCandidateStatus
@@ -39,6 +70,7 @@ from powercontext.builtin.runtime import (
     HandoffResolution,
     HandoffSourceCitation,
     HandoffStatement,
+    InvalidRuntimeRequestError,
     MemoryChange,
     MemoryChangesPage,
     MemoryEntriesPage,
@@ -54,9 +86,16 @@ from powercontext.builtin.runtime import (
     PrepareHandoff,
     RememberMemoryRequest,
     SourceReceipt,
+    TopicMemoryFlushResult,
 )
 from powercontext.builtin.runtime import (
     ApproveArtifactCandidateRequest as RuntimeApproveArtifactCandidateRequest,
+)
+from powercontext.builtin.runtime import (
+    CommitConnectorCheckpoint as RuntimeCommitConnectorCheckpoint,
+)
+from powercontext.builtin.runtime import (
+    ConnectorCheckpointState as RuntimeConnectorCheckpointState,
 )
 from powercontext.builtin.runtime import (
     GenerateExperienceRequest as RuntimeGenerateExperienceRequest,
@@ -74,6 +113,7 @@ from powercontext.builtin.runtime import (
     GetMemoryEntryRequest as RuntimeGetMemoryEntryRequest,
 )
 from powercontext.builtin.runtime import GetSkillRequest as RuntimeGetSkillRequest
+from powercontext.builtin.runtime import GetTopicMemoryRequest as RuntimeGetTopicMemoryRequest
 from powercontext.builtin.runtime import (
     ImportExternalSkillRequest as RuntimeImportExternalSkillRequest,
 )
@@ -107,11 +147,40 @@ from powercontext.builtin.runtime import (
 from powercontext.builtin.runtime import (
     SearchMemoryRequest as RuntimeSearchMemoryRequest,
 )
+from powercontext.builtin.runtime import SearchTopicMemoryRequest as RuntimeSearchTopicMemoryRequest
 from powercontext.builtin.runtime import (
     Statistics as RuntimeStatistics,
 )
+from powercontext.builtin.runtime import (
+    SubmitSourceObservation as RuntimeSubmitSourceObservation,
+)
 from powercontext.builtin.sources import ExternalSkillImportMode as RuntimeExternalSkillImportMode
+from powercontext.builtin.tags import TagFilter
+from powercontext.builtin.work import (
+    AcknowledgeHandoff as RuntimeAcknowledgeHandoff,
+)
+from powercontext.builtin.work import (
+    CreateWorkContract as RuntimeCreateWorkContract,
+)
+from powercontext.builtin.work import (
+    CurrentWorkHandoff as RuntimeCurrentWorkHandoff,
+)
+from powercontext.builtin.work import (
+    HandoffAcknowledgement as RuntimeHandoffAcknowledgement,
+)
+from powercontext.builtin.work import (
+    HandoffCurrentWork as RuntimeHandoffCurrentWork,
+)
+from powercontext.builtin.work import PreparedWorkHandoff as RuntimePreparedWorkHandoff
+from powercontext.builtin.work import ReceiverChecks as RuntimeReceiverChecks
+from powercontext.builtin.work import RecordTaskOutcome as RuntimeRecordTaskOutcome
+from powercontext.builtin.work import TaskCheck as RuntimeTaskCheck
+from powercontext.builtin.work import TaskOutcome as RuntimeTaskOutcome
+from powercontext.builtin.work import WorkClaim as RuntimeWorkClaim
+from powercontext.builtin.work import WorkContract as RuntimeWorkContract
+from powercontext.builtin.work import WorkSourceReceipt as RuntimeWorkSourceReceipt
 from powercontext.http import (
+    AcknowledgeHandoffRequest,
     ActivateHandoffRequest,
     ApproveArtifactCandidateRequest,
     ArtifactCandidate,
@@ -122,7 +191,10 @@ from powercontext.http import (
     CaptureContentSourceRequest,
     CaptureContentSourceResponse,
     CaptureStatus,
+    CommitConnectorCheckpointRequest,
     CommittedHandoff,
+    ConnectorCheckpointState,
+    CreateWorkContractRequest,
     EntryChange,
     EntryChangeOperation,
     ExperienceArtifact,
@@ -132,16 +204,21 @@ from powercontext.http import (
     ExternalSkillResolutionStatus,
     FlushMemoryResponse,
     FlushStatus,
+    FlushTopicMemoryResponse,
     GeneratedCandidateResponse,
     GeneratedCandidateStatus,
     GenerateExperienceRequest,
     GenerateSkillRequest,
     GetArtifactCandidateRequest,
+    GetConnectorCheckpointRequest,
     GetExperienceRequest,
     GetMemoryEntryRequest,
     GetSkillRequest,
+    GetTopicMemoryRequest,
+    HandoffAcknowledgement,
     HandoffActivationStatus,
     HandoffClaim,
+    HandoffCurrentWorkRequest,
     HandoffDisposition,
     HandoffEvidenceStatus,
     HandoffResolutionStatus,
@@ -153,6 +230,7 @@ from powercontext.http import (
     ListExternalSkillsResponse,
     ListMemoryChangesResponse,
     ListMemoryEntriesResponse,
+    ManagedSkillLibraryEntry,
     MemoryEntry,
     MemoryEntryState,
     MemoryMatchedBy,
@@ -162,9 +240,13 @@ from powercontext.http import (
     PreparedContextSchema,
     PreparedContextStatus,
     PreparedHandoffSchema,
+    PreparedWorkHandoff,
     PrepareHandoffRequest,
+    ProfileCandidateProposal,
+    ProfileWriteContent,
     ProposeExperienceRequest,
     ProposeSkillRequest,
+    RecordTaskOutcomeRequest,
     RejectArtifactCandidateRequest,
     ResolveExternalSkillRequest,
     RetireMemoryEntryRequest,
@@ -175,10 +257,38 @@ from powercontext.http import (
     SearchMemoryHit,
     SearchMemoryRequest,
     SearchMemoryResponse,
+    SearchTopicMemoryHit,
+    SearchTopicMemoryRequest,
+    SearchTopicMemoryResponse,
     SkillArtifact,
+    SkillGovernance,
+    SkillLifecycleState,
+    SkillPackageReference,
     SkillProposal,
     SkillValidationItem,
+    SourceDefinitionManifest,
+    SourceObservationReceipt,
     SourceReference,
+    SourceTypeReference,
+    SubmitSourceObservationRequest,
+    TaskCheck,
+    TopicMemoryArtifact,
+    TopicMemoryFlushStatus,
+    TopicMemoryMatchedBy,
+    TopicMemoryUsedSearchMode,
+    WorkClaim,
+    WorkSourceKind,
+    WorkSourceReceipt,
+)
+from powercontext.http import ConnectorBinding as HttpConnectorBinding
+from powercontext.http import (
+    FailureRecord as TransportFailureRecord,
+)
+from powercontext.http import (
+    FailureSignature as TransportFailureSignature,
+)
+from powercontext.http import (
+    FailureVerification as TransportFailureVerification,
 )
 from powercontext.http import (
     HandoffActivation as TransportHandoffActivation,
@@ -198,6 +308,8 @@ from powercontext.http import (
 from powercontext.http import (
     HandoffEvidenceCheck as TransportHandoffEvidenceCheck,
 )
+from powercontext.http import HandoffGenerationEnvelope as TransportHandoffGenerationEnvelope
+from powercontext.http import HandoffGenerationMetadata as TransportHandoffGenerationMetadata
 from powercontext.http import (
     HandoffMemoryCitation as TransportHandoffMemoryCitation,
 )
@@ -228,6 +340,16 @@ from powercontext.http import (
 from powercontext.http import (
     RememberMemoryRequest as TransportRememberMemoryRequest,
 )
+from powercontext.http import RepairSurface as TransportRepairSurface
+from powercontext.sources import (
+    ConnectorBinding as RuntimeConnectorBinding,
+)
+from powercontext.sources import (
+    SourceDefinitionManifest as RuntimeSourceDefinitionManifest,
+)
+from powercontext.sources import (
+    SourceObservation as RuntimeSourceObservation,
+)
 from powercontext.sources import SourceRef
 
 
@@ -239,10 +361,190 @@ def capture_request(value: CaptureContentSourceRequest) -> CaptureSource:
     )
 
 
+def create_work_contract_request(value: CreateWorkContractRequest) -> RuntimeCreateWorkContract:
+    try:
+        return RuntimeCreateWorkContract(
+            source_id=value.source_id,
+            contract=RuntimeWorkContract(
+                objective=value.contract.objective,
+                facts=tuple(_runtime_work_claim(claim) for claim in value.contract.facts),
+                in_scope=tuple(item.root for item in value.contract.in_scope),
+                exclusions=tuple(item.root for item in value.contract.exclusions),
+                completion_criteria=tuple(item.root for item in value.contract.completion_criteria),
+                authorization_notes=tuple(item.root for item in value.contract.authorization_notes),
+                open_questions=tuple(item.root for item in value.contract.open_questions),
+            ),
+        )
+    except ValidationError as error:
+        raise InvalidRuntimeRequestError("work-contract") from error
+
+
+def handoff_current_work_request(value: HandoffCurrentWorkRequest) -> RuntimeHandoffCurrentWork:
+    try:
+        return RuntimeHandoffCurrentWork(
+            source_id=value.source_id,
+            handoff=RuntimeCurrentWorkHandoff(
+                objective=value.handoff.objective,
+                state=tuple(_runtime_work_claim(claim) for claim in value.handoff.state),
+                disposition=value.handoff.disposition.value,
+                next_action=(
+                    None if value.handoff.next_action is None else _runtime_work_claim(value.handoff.next_action)
+                ),
+                omissions=tuple(item.root for item in value.handoff.omissions),
+            ),
+        )
+    except ValidationError as error:
+        raise InvalidRuntimeRequestError("current-work-handoff") from error
+
+
+def record_task_outcome_request(value: RecordTaskOutcomeRequest) -> RuntimeRecordTaskOutcome:
+    try:
+        return RuntimeRecordTaskOutcome(
+            source_id=value.source_id,
+            outcome=RuntimeTaskOutcome(
+                objective=value.outcome.objective,
+                status=value.outcome.status.value,
+                summary=value.outcome.summary,
+                handoff_receipt_ref=(
+                    None
+                    if value.outcome.handoff_receipt_ref is None
+                    else runtime_source_reference(value.outcome.handoff_receipt_ref)
+                ),
+                observations=tuple(_runtime_work_claim(claim) for claim in value.outcome.observations),
+                checks=tuple(_runtime_task_check(check) for check in value.outcome.checks),
+                produced_artifacts=tuple(runtime_artifact_reference(ref) for ref in value.outcome.produced_artifacts),
+                remaining_work=tuple(item.root for item in value.outcome.remaining_work),
+            ),
+        )
+    except ValidationError as error:
+        raise InvalidRuntimeRequestError("task-outcome") from error
+
+
+def acknowledge_handoff_request(value: AcknowledgeHandoffRequest) -> RuntimeAcknowledgeHandoff:
+    try:
+        return RuntimeAcknowledgeHandoff(
+            source_id=value.source_id,
+            receiver=value.receiver,
+            status=value.status.value,
+            selection=value.selection.value,
+            receiver_checks=(
+                None
+                if value.receiver_checks is None
+                else RuntimeReceiverChecks(
+                    live_state=value.receiver_checks.live_state.value,
+                    capability=value.receiver_checks.capability.value,
+                    authorization=value.receiver_checks.authorization.value,
+                )
+            ),
+            prepared=None if value.prepared is None else runtime_prepared_handoff(value.prepared),
+            revision=None if value.revision is None else runtime_artifact_reference(value.revision),
+            message=value.message,
+        )
+    except ValidationError as error:
+        raise InvalidRuntimeRequestError("handoff-acknowledgement") from error
+
+
+def work_source_receipt_response(value: RuntimeWorkSourceReceipt) -> WorkSourceReceipt:
+    return WorkSourceReceipt(
+        kind=WorkSourceKind(value.kind),
+        source=source_reference(value.source_ref),
+        position=value.position,
+        content_digest=value.content_digest,
+    )
+
+
+def prepared_work_handoff_response(value: RuntimePreparedWorkHandoff) -> PreparedWorkHandoff:
+    return PreparedWorkHandoff(
+        boundary=work_source_receipt_response(value.boundary),
+        handoff=prepared_handoff_response(value.handoff),
+    )
+
+
+def handoff_acknowledgement_response(value: RuntimeHandoffAcknowledgement) -> HandoffAcknowledgement:
+    return HandoffAcknowledgement(
+        resolution=handoff_resolution_response(value.resolution),
+        receipt=work_source_receipt_response(value.receipt),
+    )
+
+
+def _runtime_work_claim(value: WorkClaim) -> RuntimeWorkClaim:
+    return RuntimeWorkClaim(
+        text=value.text,
+        basis=value.basis.value,
+        evidence=tuple(runtime_handoff_citation(citation) for citation in value.evidence),
+    )
+
+
+def _runtime_task_check(value: TaskCheck) -> RuntimeTaskCheck:
+    return RuntimeTaskCheck(
+        name=value.name,
+        status=value.status.value,
+        details=value.details,
+        basis=value.basis.value,
+        evidence=tuple(runtime_handoff_citation(citation) for citation in value.evidence),
+    )
+
+
 def capture_response(value: SourceReceipt) -> CaptureContentSourceResponse:
     return CaptureContentSourceResponse(
         status=CaptureStatus.ACCEPTED,
         source=SourceReference(name=value.source_ref.source_type, source_id=value.source_ref.source_id),
+        position=value.sequence,
+    )
+
+
+def runtime_source_definition_manifest(value: SourceDefinitionManifest) -> RuntimeSourceDefinitionManifest:
+    try:
+        return RuntimeSourceDefinitionManifest.model_validate(value.model_dump(mode="json", by_alias=True))
+    except ValidationError as error:
+        raise InvalidRuntimeRequestError("source-definition-manifest") from error
+
+
+def source_definition_manifest_response(value: RuntimeSourceDefinitionManifest) -> SourceDefinitionManifest:
+    return SourceDefinitionManifest.model_validate(value.model_dump(mode="json", by_alias=True))
+
+
+def runtime_connector_binding(value: HttpConnectorBinding) -> RuntimeConnectorBinding:
+    try:
+        return RuntimeConnectorBinding.model_validate(value.model_dump(mode="json"))
+    except ValidationError as error:
+        raise InvalidRuntimeRequestError("connector-binding") from error
+
+
+def connector_checkpoint_request(value: GetConnectorCheckpointRequest) -> RuntimeConnectorBinding:
+    return runtime_connector_binding(value.binding)
+
+
+def submit_source_observation_request(value: SubmitSourceObservationRequest) -> RuntimeSubmitSourceObservation:
+    try:
+        return RuntimeSubmitSourceObservation(
+            scope_id=value.scope_id,
+            observation=RuntimeSourceObservation.model_validate(value.observation.model_dump(mode="json")),
+        )
+    except ValidationError as error:
+        raise InvalidRuntimeRequestError("source-observation") from error
+
+
+def commit_connector_checkpoint_request(
+    value: CommitConnectorCheckpointRequest,
+) -> RuntimeCommitConnectorCheckpoint:
+    try:
+        return RuntimeCommitConnectorCheckpoint(
+            binding=runtime_connector_binding(value.binding),
+            expected=value.expected,
+            checkpoint=value.checkpoint,
+        )
+    except ValidationError as error:
+        raise InvalidRuntimeRequestError("connector-checkpoint") from error
+
+
+def connector_checkpoint_response(value: RuntimeConnectorCheckpointState) -> ConnectorCheckpointState:
+    return ConnectorCheckpointState.model_validate(value.model_dump(mode="json"))
+
+
+def source_observation_receipt_response(value: SourceReceipt) -> SourceObservationReceipt:
+    return SourceObservationReceipt(
+        source=source_reference(value.source_ref),
         position=value.sequence,
     )
 
@@ -259,6 +561,8 @@ def flush_response(value: MemoryFlushResult) -> FlushMemoryResponse:
         high_watermark=value.high_watermark,
         processed_source_count=value.source_count,
         memory=None if value.memory_ref is None else artifact_reference(value.memory_ref),
+        held_count=value.held_count,
+        hold_codes=list(value.hold_codes),
     )
 
 
@@ -274,6 +578,7 @@ def propose_experience_request(value: ProposeExperienceRequest) -> RuntimePropos
         proposal=experience_content(value.proposal),
         sources=tuple(runtime_source_reference(source) for source in value.source_refs),
         artifacts=tuple(runtime_artifact_reference(artifact) for artifact in value.artifact_refs),
+        memory_citations=tuple(runtime_citation(citation) for citation in value.memory_citations or ()),
         target=None if value.target is None else runtime_artifact_reference(value.target),
         reason=value.reason,
     )
@@ -351,17 +656,37 @@ def revise_candidate_request(value: ReviseArtifactCandidateRequest) -> RuntimeRe
         proposal=reviewed_content(value.proposal),
         sources=tuple(runtime_source_reference(source) for source in value.source_refs),
         artifacts=tuple(runtime_artifact_reference(artifact) for artifact in value.artifact_refs),
+        memory_citations=(
+            None
+            if value.memory_citations is None
+            else tuple(runtime_citation(citation) for citation in value.memory_citations or ())
+        ),
         target=None if value.target is None else runtime_artifact_reference(value.target),
         reason=value.reason,
     )
 
 
 def search_request(value: SearchMemoryRequest) -> RuntimeSearchMemoryRequest:
-    return RuntimeSearchMemoryRequest(query=value.query, limit=value.limit, mode=value.mode.value)
+    return RuntimeSearchMemoryRequest(
+        query=value.query,
+        limit=value.limit,
+        mode=value.mode.value,
+        tag_filter=None
+        if value.tag_filter is None
+        else TagFilter.model_validate_json(value.tag_filter.model_dump_json()),
+    )
+
+
+def topic_memory_search_request(value: SearchTopicMemoryRequest) -> RuntimeSearchTopicMemoryRequest:
+    return RuntimeSearchTopicMemoryRequest(query=value.query, limit=value.limit)
+
+
+def topic_memory_get_request(value: GetTopicMemoryRequest) -> RuntimeGetTopicMemoryRequest:
+    return RuntimeGetTopicMemoryRequest(artifact=runtime_artifact_reference(value.artifact))
 
 
 def prepare_context_request(value: TransportPrepareContextRequest) -> PrepareContextRequest:
-    return PrepareContextRequest(query=value.query, max_bytes=value.max_bytes)
+    return PrepareContextRequest.model_validate_json(value.model_dump_json(exclude={"scope_id"}, exclude_unset=True))
 
 
 def activate_handoff_request(value: ActivateHandoffRequest) -> ActivateHandoff:
@@ -393,6 +718,9 @@ def prepare_handoff_request(value: PrepareHandoffRequest) -> PrepareHandoff:
 
 def runtime_handoff_draft(value: TransportHandoffDraft) -> HandoffDraft:
     return HandoffDraft(
+        generation=None
+        if value.generation is None
+        else HandoffGenerationEnvelope.model_validate_json(value.generation.model_dump_json()),
         objective=value.objective,
         state=tuple(runtime_handoff_statement(statement) for statement in value.state),
         disposition=value.disposition.value,
@@ -403,6 +731,9 @@ def runtime_handoff_draft(value: TransportHandoffDraft) -> HandoffDraft:
 
 def runtime_prepared_handoff(value: TransportPreparedHandoff) -> PreparedHandoff:
     return PreparedHandoff(
+        generation=None
+        if value.generation is None
+        else HandoffGenerationEnvelope.model_validate_json(value.generation.model_dump_json()),
         scope_id=value.scope_id,
         base=None if value.base is None else runtime_artifact_reference(value.base),
         content=runtime_handoff_content(value.content),
@@ -411,6 +742,9 @@ def runtime_prepared_handoff(value: TransportPreparedHandoff) -> PreparedHandoff
 
 def handoff_draft_response(value: HandoffDraft) -> TransportHandoffDraft:
     return TransportHandoffDraft(
+        generation=None
+        if value.generation is None
+        else TransportHandoffGenerationEnvelope.model_validate_json(value.generation.model_dump_json()),
         objective=value.objective,
         state=[handoff_statement(statement) for statement in value.state],
         disposition=HandoffDisposition(value.disposition),
@@ -421,6 +755,7 @@ def handoff_draft_response(value: HandoffDraft) -> TransportHandoffDraft:
 
 def prepared_handoff_response(value: PreparedHandoff) -> TransportPreparedHandoff:
     return TransportPreparedHandoff.model_validate({
+        "generation": None if value.generation is None else value.generation.model_dump(mode="json"),
         "schema": PreparedHandoffSchema(value.schema_version),
         "scope_id": value.scope_id,
         "base": None if value.base is None else artifact_reference(value.base),
@@ -475,6 +810,38 @@ def search_response(value: MemorySearchPage) -> SearchMemoryResponse:
     )
 
 
+def topic_memory_flush_response(value: TopicMemoryFlushResult) -> FlushTopicMemoryResponse:
+    return FlushTopicMemoryResponse(status=TopicMemoryFlushStatus(value.status))
+
+
+def topic_memory_search_response(value: TopicMemorySearchResult) -> SearchTopicMemoryResponse:
+    return SearchTopicMemoryResponse(
+        mode=TopicMemoryUsedSearchMode(value.mode),
+        hits=[
+            SearchTopicMemoryHit(
+                artifact=artifact_reference(hit.artifact_ref),
+                title=hit.title,
+                summary=hit.summary,
+                snippet=hit.snippet,
+                score=hit.score,
+                matched_by=[TopicMemoryMatchedBy(channel) for channel in hit.matched_by],
+            )
+            for hit in value.hits
+        ],
+    )
+
+
+def topic_memory_response(value: PublishedTopicMemory) -> TopicMemoryArtifact:
+    topic = value.topic
+    return TopicMemoryArtifact(
+        artifact=artifact_reference(topic.as_ref()),
+        title=topic.content.title,
+        summary=topic.content.summary,
+        detail=topic.content.detail,
+        source_refs=[source_reference(reference) for reference in topic.lineage.sources],
+    )
+
+
 def prepared_context_response(value: PreparedContext) -> TransportPreparedContext:
     return TransportPreparedContext.model_validate({
         "schema": PreparedContextSchema(value.schema_version),
@@ -514,6 +881,7 @@ def candidate_response(value: RuntimeArtifactCandidate[Any]) -> ArtifactCandidat
         proposal=reviewed_proposal(value.proposal),
         source_refs=[source_reference(source) for source in value.sources],
         artifact_refs=[artifact_reference(artifact) for artifact in value.artifacts],
+        memory_citations=[transport_citation(citation) for citation in value.memory_citations],
         target=None if value.target is None else artifact_reference(value.target),
         reason=value.reason,
         result_artifact=None if value.result_artifact is None else artifact_reference(value.result_artifact),
@@ -541,6 +909,7 @@ def experience_response(value: Experience) -> ExperienceArtifact:
         content=experience_proposal(value.content),
         source_refs=[source_reference(source) for source in value.lineage.sources],
         artifact_refs=[artifact_reference(artifact) for artifact in value.lineage.artifacts],
+        memory_citations=[transport_citation(citation) for citation in value.lineage.memory_citations],
     )
 
 
@@ -550,6 +919,27 @@ def skill_response(value: Skill) -> SkillArtifact:
         content=skill_proposal(value.content),
         source_refs=[source_reference(source) for source in value.lineage.sources],
         artifact_refs=[artifact_reference(artifact) for artifact in value.lineage.artifacts],
+        memory_citations=[],
+    )
+
+
+def skill_governance(value: ArtifactGovernance) -> SkillGovernance:
+    return SkillGovernance(
+        artifact=artifact_reference(value.artifact),
+        lifecycle_state=SkillLifecycleState(value.lifecycle_state.value),
+        replacement_artifact_id=value.replacement_artifact_id,
+        governance_generation=value.governance_generation,
+    )
+
+
+def managed_skill_library_entry(value: Skill, governance: ArtifactGovernance) -> ManagedSkillLibraryEntry:
+    response = skill_response(value)
+    return ManagedSkillLibraryEntry(
+        artifact=response.artifact,
+        content=response.content,
+        source_refs=response.source_refs,
+        artifact_refs=response.artifact_refs,
+        governance=skill_governance(governance),
     )
 
 
@@ -604,6 +994,21 @@ def experience_content(value: ExperienceProposal) -> ExperienceContent:
         action=value.action,
         outcome=value.outcome,
         lesson=value.lesson,
+        failure=None if value.failure is None else runtime_failure_record(value.failure),
+    )
+
+
+def runtime_failure_record(value: TransportFailureRecord) -> FailureRecord:
+    return FailureRecord(
+        signature=FailureSignature(
+            recall_cue=value.signature.recall_cue,
+            symptom=value.signature.symptom,
+        ),
+        repair_surface=value.repair_surface.value,
+        verification=FailureVerification(
+            condition=value.verification.condition,
+            check_subject=value.verification.check_subject,
+        ),
     )
 
 
@@ -613,6 +1018,21 @@ def experience_proposal(value: ExperienceContent) -> ExperienceProposal:
         action=value.action,
         outcome=value.outcome,
         lesson=value.lesson,
+        failure=None if value.failure is None else transport_failure_record(value.failure),
+    )
+
+
+def transport_failure_record(value: FailureRecord) -> TransportFailureRecord:
+    return TransportFailureRecord(
+        signature=TransportFailureSignature(
+            recall_cue=value.signature.recall_cue,
+            symptom=value.signature.symptom,
+        ),
+        repair_surface=TransportRepairSurface(value.repair_surface),
+        verification=TransportFailureVerification(
+            condition=value.verification.condition,
+            check_subject=value.verification.check_subject,
+        ),
     )
 
 
@@ -622,6 +1042,11 @@ def skill_content(value: SkillProposal) -> SkillContent:
         description=value.description,
         instructions=value.instructions,
         validation=tuple(item.root for item in value.validation),
+        package=None if value.package is None else SkillPackageRef.model_validate(value.package.model_dump()),
+        license=value.license,
+        compatibility=value.compatibility,
+        metadata={} if value.metadata is None else value.metadata,
+        allowed_tools=value.allowed_tools,
     )
 
 
@@ -631,16 +1056,27 @@ def skill_proposal(value: SkillContent) -> SkillProposal:
         description=value.description,
         instructions=value.instructions,
         validation=[SkillValidationItem(item) for item in value.validation],
+        package=(None if value.package is None else SkillPackageReference.model_validate(value.package.model_dump())),
+        license=value.license,
+        compatibility=value.compatibility,
+        metadata=value.metadata,
+        allowed_tools=value.allowed_tools,
     )
 
 
-def reviewed_content(value: ExperienceProposal | SkillProposal) -> ExperienceContent | SkillContent:
+def reviewed_content(
+    value: ExperienceProposal | SkillProposal | ProfileWriteContent,
+) -> ExperienceContent | SkillContent | RuntimeProfileWriteContent:
+    if isinstance(value, ProfileWriteContent):
+        return RuntimeProfileWriteContent.model_validate(value.model_dump(mode="json"))
     if isinstance(value, ExperienceProposal):
         return experience_content(value)
     return skill_content(value)
 
 
-def reviewed_proposal(value: object) -> ExperienceProposal | SkillProposal:
+def reviewed_proposal(value: object) -> ExperienceProposal | SkillProposal | ProfileCandidateProposal:
+    if isinstance(value, RuntimeProfileCandidateProposal):
+        return ProfileCandidateProposal.model_validate(value.model_dump(mode="json", by_alias=True))
     if isinstance(value, ExperienceContent):
         return experience_proposal(value)
     if isinstance(value, SkillContent):
@@ -666,6 +1102,14 @@ def source_reference(value: SourceRef) -> SourceReference:
 
 def runtime_source_reference(value: SourceReference) -> SourceRef:
     return SourceRef(source_type=value.name, source_id=value.source_id)
+
+
+def source_type_reference(value: SourceRef) -> SourceTypeReference:
+    return SourceTypeReference(source_type=value.source_type, source_id=value.source_id)
+
+
+def runtime_source_type_reference(value: SourceTypeReference) -> SourceRef:
+    return SourceRef(source_type=value.source_type, source_id=value.source_id)
 
 
 def runtime_citation(value: TransportMemoryCitation) -> RuntimeMemoryCitation:
@@ -750,6 +1194,9 @@ def handoff_omission(value: HandoffOmission) -> TransportHandoffOmission:
 
 def runtime_handoff_content(value: TransportHandoffContent) -> HandoffContent:
     return HandoffContent(
+        generation=None
+        if value.generation is None
+        else HandoffGenerationMetadata.model_validate_json(value.generation.model_dump_json()),
         objective=value.objective,
         state=tuple(runtime_handoff_statement(statement) for statement in value.state),
         disposition=value.disposition.value,
@@ -760,6 +1207,9 @@ def runtime_handoff_content(value: TransportHandoffContent) -> HandoffContent:
 
 def handoff_content(value: HandoffContent) -> TransportHandoffContent:
     return TransportHandoffContent.model_validate({
+        "generation": None
+        if value.generation is None
+        else TransportHandoffGenerationMetadata.model_validate_json(value.generation.model_dump_json()),
         "schema": HandoffSchema(value.schema_version),
         "objective": value.objective,
         "state": [handoff_statement(statement) for statement in value.state],

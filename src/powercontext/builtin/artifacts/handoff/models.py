@@ -1,3 +1,17 @@
+# Copyright (c) 2026 OceanBase.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Immutable public values for the Handoff Artifact Family."""
 
 from __future__ import annotations
@@ -7,6 +21,10 @@ from typing import Annotated, ClassVar, Literal, TypeAlias
 from pydantic import BaseModel, ConfigDict, Field, InstanceOf, field_validator, model_validator
 
 from powercontext.artifacts import Artifact, ArtifactDraft, ArtifactRef
+from powercontext.builtin.artifacts.handoff.generation_metadata import (
+    HandoffGenerationEnvelope,
+    HandoffGenerationMetadata,
+)
 from powercontext.builtin.artifacts.memory import MemoryCitation, MemoryEntryVersion
 from powercontext.sources import Source, SourceRef
 
@@ -201,6 +219,8 @@ class HandoffOmission(_HandoffValue):
 class HandoffContent(_HandoffValue):
     """The complete content shared by temporary and committed Handoffs."""
 
+    generation: HandoffGenerationMetadata | None = Field(default=None, exclude_if=lambda value: value is None)
+
     schema_version: Literal["powercontext.handoff.v1"] = Field(
         default="powercontext.handoff.v1",
         alias="schema",
@@ -225,6 +245,8 @@ class HandoffContent(_HandoffValue):
 
 class HandoffDraft(_HandoffValue):
     """Inspectable and correctable content before Handoff finalization."""
+
+    generation: HandoffGenerationEnvelope | None = Field(default=None, exclude_if=lambda value: value is None)
 
     objective: Annotated[str, Field(max_length=MAX_HANDOFF_TEXT_LENGTH)]
     state: Annotated[
@@ -293,6 +315,8 @@ class HandoffArtifactDraft(ArtifactDraft[HandoffContent]):
 
 class PreparedHandoff(_HandoffValue):
     """Finalized temporary Handoff associated with one scope and observed head."""
+
+    generation: HandoffGenerationEnvelope | None = Field(default=None, exclude_if=lambda value: value is None)
 
     schema_version: Literal["powercontext.prepared-handoff.v1"] = Field(
         default="powercontext.prepared-handoff.v1",

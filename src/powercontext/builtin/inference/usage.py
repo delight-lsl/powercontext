@@ -1,3 +1,17 @@
+# Copyright (c) 2026 OceanBase.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Scope-bound model usage reporting for PowerContext-owned adapters."""
 
 from __future__ import annotations
@@ -9,7 +23,7 @@ from dataclasses import dataclass
 from typing import Generic, TypeVar
 
 from powercontext.builtin.inference.models import EmbeddingResult, GenerationResult, InferenceUsage
-from powercontext.builtin.inference.protocols import EmbeddingModel, StructuredGenerator
+from powercontext.builtin.inference.protocols import EmbeddingModel, StructuredGenerator, embed_query
 from powercontext.builtin.statistics import ModelUsageOperation, ModelUsagePurpose
 
 InputT = TypeVar("InputT")
@@ -84,6 +98,11 @@ class UsageReportingEmbeddingModel:
 
     async def embed(self, texts: tuple[str, ...], /) -> EmbeddingResult:
         result = await self._delegate.embed(texts)
+        await _report(ModelUsageOperation.EMBEDDING, result.usage)
+        return result
+
+    async def embed_query(self, texts: tuple[str, ...], /) -> EmbeddingResult:
+        result = await embed_query(self._delegate, texts)
         await _report(ModelUsageOperation.EMBEDDING, result.usage)
         return result
 

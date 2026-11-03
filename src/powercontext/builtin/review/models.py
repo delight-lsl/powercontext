@@ -1,3 +1,17 @@
+# Copyright (c) 2026 OceanBase.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Family-neutral Candidate and Review Inbox domain values."""
 
 from __future__ import annotations
@@ -7,7 +21,8 @@ from typing import Generic, TypeVar
 
 from pydantic import BaseModel, Field, StrictInt, field_validator, model_validator
 
-from powercontext.artifacts import ArtifactRef
+from powercontext.artifacts import ArtifactRef, MemoryCitation
+from powercontext.builtin.evidence.models import ResolvedEvidence
 from powercontext.limits import MAX_ARTIFACT_ID_LENGTH
 from powercontext.sources import SourceRef
 
@@ -37,6 +52,7 @@ class ArtifactCandidate(BaseModel, Generic[ProposalT]):
     proposal: ProposalT
     sources: tuple[SourceRef, ...] = Field(default=(), max_length=MAX_CANDIDATE_EVIDENCE)
     artifacts: tuple[ArtifactRef, ...] = Field(default=(), max_length=MAX_CANDIDATE_EVIDENCE)
+    memory_citations: tuple[MemoryCitation, ...] = Field(default=(), max_length=MAX_CANDIDATE_EVIDENCE)
     target: ArtifactRef | None = None
     reason: str | None = Field(default=None, min_length=1, max_length=MAX_CANDIDATE_REASON_LENGTH)
     result_artifact: ArtifactRef | None = None
@@ -50,13 +66,19 @@ class ArtifactCandidate(BaseModel, Generic[ProposalT]):
         return value
 
     @model_validator(mode="after")
-    def validate_lifecycle(self):
-        if not self.sources and not self.artifacts:
+    def validate_evidence(self):
+        if not self.sources and not self.artifacts and not self.memory_citations:
             raise ValueError("Candidate evidence must include a Source or Artifact reference")  # noqa: TRY003
-        if len(self.sources) + len(self.artifacts) > MAX_CANDIDATE_EVIDENCE:
+        if len(self.sources) + len(self.artifacts) + len(self.memory_citations) > MAX_CANDIDATE_EVIDENCE:
             raise ValueError(f"Candidate evidence must not exceed {MAX_CANDIDATE_EVIDENCE} references")  # noqa: TRY003
         if self.target is not None and self.target.family != self.family:
             raise ValueError("Candidate target must belong to the proposed family")  # noqa: TRY003
+        if self.memory_citations and self.family != "experience":
+            raise ValueError("only Experience Candidates accept Memory citations")  # noqa: TRY003
+        return self
+
+    @model_validator(mode="after")
+    def validate_lifecycle(self):
         if self.status is CandidateStatus.APPROVED:
             if self.result_artifact is None:
                 raise ValueError("approved Candidate must identify its result Artifact")  # noqa: TRY003
@@ -75,6 +97,15 @@ class ArtifactCandidatePage(BaseModel, Generic[ProposalT]):
 
     candidates: tuple[ArtifactCandidate[ProposalT], ...]
     next_cursor: str | None = None
+
+
+class CandidateEvidenceView(BaseModel):
+    """Current Candidate evidence expanded under the reader's current authority."""
+
+    candidate_id: str
+    version: int
+    resolved: ResolvedEvidence | None = None
+    unavailable: str | None = None
 
 
 __all__ = [

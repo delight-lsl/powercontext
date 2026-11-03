@@ -1,6 +1,24 @@
+# Copyright (c) 2026 OceanBase.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import asyncio
+import json
 import logging
+import os
+import re
 from collections.abc import Callable, Coroutine
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Self, TypeVar
 
@@ -8,6 +26,7 @@ import httpx
 from fastapi import Request
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
+from jsonschema import Draft202012Validator
 
 from powercontext.builtin.runtime import MemoryEntriesPage
 from powercontext.server.access import HttpAccessLogMiddleware
@@ -18,11 +37,40 @@ from powercontext.server.mcp import create_mcp_server, mount_mcp
 ResultT = TypeVar("ResultT")
 
 
+def test_mcp_guidance_is_visible_without_loading_a_skill() -> None:
+    async def inspect() -> tuple[str, list[Any]]:
+        async with Client(create_mcp_server(create_app())) as client:
+            assert client.initialize_result is not None
+            return client.initialize_result.instructions or "", await client.list_tools()
+
+    guidance, tools = asyncio.run(inspect())
+    assert guidance
+    names = {tool.name for tool in tools}
+    assert set(re.findall(r"\b[a-z]+(?:_[a-z]+)+\b", guidance)) <= names
+    if directory := os.environ.get("POWERCONTEXT_GUIDANCE_EXPORT"):
+        root = Path(__file__).parents[1]
+        for host in ("codex", "claude-code", "workbuddy", "agent-plugin", "minimax"):
+            plugin = root / "integrations" / host
+            plugin /= "powercontext" if host == "agent-plugin" else "plugins/powercontext"
+            name = "powercontext-project-context"
+            content = (plugin / f"skills/{name}/SKILL.md").read_text(encoding="utf-8")
+            catalog = {
+                "host": host,
+                "guidance": guidance,
+                "tools": [
+                    {"name": tool.name, "description": tool.description, "parameters": tool.inputSchema}
+                    for tool in tools
+                ],
+                "skill": {"name": name, "content": content},
+            }
+            (Path(directory) / f"{host}.json").write_text(json.dumps(catalog, indent=2), encoding="utf-8")
+
+
 def run_async(operation: Callable[[], Coroutine[Any, Any, ResultT]]) -> ResultT:
     return asyncio.run(operation())
 
 
-def test_mcp_exposes_only_the_agent_facing_server_operations() -> None:
+def test_mcp_exposes_only_data_plane_and_integration_control_operations() -> None:
     async def inspect_components() -> tuple[list[str], int, int]:
         async with Client(create_mcp_server(create_app())) as client:
             tools = await client.list_tools()
@@ -33,38 +81,200 @@ def test_mcp_exposes_only_the_agent_facing_server_operations() -> None:
     tool_names, resource_count, prompt_count = run_async(inspect_components)
 
     assert set(tool_names) == {
+        "generate_experience",
+        "get_experience",
+        "propose_experience",
+        "generate_skill",
+        "get_skill",
+        "propose_skill",
+        "list_managed_skills",
+        "scan_external_skills",
+        "list_external_skills",
+        "resolve_external_skill",
+        "import_external_skill",
         "activate_handoff",
+        "acknowledge_handoff",
         "approve_artifact_candidate",
         "capture_content_source",
+        "clear_scope_binding",
         "commit_handoff",
         "continue_handoff",
+        "create_scope",
+        "create_work_contract",
         "finalize_handoff",
         "get_artifact_candidate",
+        "get_memory_capacity",
         "get_memory_entry",
+        "get_topic_memory",
+        "get_scope",
+        "handoff_current_work",
+        "create_dream_run",
+        "get_dream_run",
+        "list_dream_runs",
         "list_artifact_candidates",
         "list_memory_entries",
+        "list_scopes",
+        "publish_artifact",
+        "query_code",
         "reject_artifact_candidate",
+        "record_task_outcome",
+        "resolve_scope_binding",
         "remember_memory",
         "retire_memory_entry",
         "revise_artifact_candidate",
         "revise_memory_entry",
         "search_memory",
+        "search_topic_memory",
+        "set_scope_binding",
     }
     assert resource_count == 0
     assert prompt_count == 0
 
 
+def test_mcp_memory_reads_are_read_only_and_flush_is_excluded() -> None:
+    async def inspect_annotations() -> dict[str, Any]:
+        async with Client(create_mcp_server(create_app())) as client:
+            return {tool.name: tool.annotations for tool in await client.list_tools()}
+
+    tools = run_async(inspect_annotations)
+
+    assert "flush_topic_memory" not in tools
+    for name in ("search_topic_memory", "get_topic_memory", "get_memory_capacity"):
+        annotations = tools[name]
+        assert annotations is not None
+        assert annotations.readOnlyHint is True
+        assert annotations.destructiveHint is False
+        assert annotations.idempotentHint is True
+        assert annotations.openWorldHint is False
+
+
+def test_mcp_full_profile_tools_describe_read_and_write_effects() -> None:
+    async def inspect_annotations() -> dict[str, Any]:
+        async with Client(create_mcp_server(create_app())) as client:
+            return {tool.name: tool.annotations for tool in await client.list_tools()}
+
+    annotations = run_async(inspect_annotations)
+    reads = {"get_experience", "get_skill", "list_managed_skills", "list_external_skills", "resolve_external_skill"}
+    writes = {
+        "generate_experience",
+        "propose_experience",
+        "generate_skill",
+        "propose_skill",
+        "scan_external_skills",
+        "import_external_skill",
+    }
+    for name in reads | writes:
+        hints = annotations[name]
+        assert hints is not None
+        assert hints.readOnlyHint is (name in reads)
+        assert hints.idempotentHint is (name in reads)
+        assert hints.destructiveHint is False
+        assert hints.openWorldHint is ("external" in name)
+
+
 def test_mcp_exposes_read_only_handoff_report_tools_only_when_feature_routes_are_enabled() -> None:
-    async def inspect_components() -> set[str]:
+    async def inspect_components() -> dict[str, Any]:
         async with Client(create_mcp_server(create_app(handoff_report_enabled=True))) as client:
-            return {tool.name for tool in await client.list_tools()}
+            return {tool.name: tool.annotations for tool in await client.list_tools()}
 
-    tool_names = run_async(inspect_components)
+    tools = run_async(inspect_components)
 
-    assert "get_handoff_report" in tool_names
-    assert "get_handoff_report_workspace" in tool_names
-    assert "record_handoff_report_activity" not in tool_names
-    assert "attach_handoff_report_workspace" not in tool_names
+    assert "get_handoff_report" in tools
+    report = tools["get_handoff_report"]
+    assert report is not None
+    assert report.readOnlyHint is True
+    assert report.destructiveHint is False
+    assert report.idempotentHint is True
+    assert report.openWorldHint is False
+
+
+def test_mcp_describes_handoff_tool_side_effects_for_host_approval() -> None:
+    async def inspect_annotations() -> dict[str, Any]:
+        async with Client(create_mcp_server(create_app())) as client:
+            return {
+                tool.name: tool.annotations
+                for tool in await client.list_tools()
+                if tool.name in {"handoff_current_work", "commit_handoff", "continue_handoff"}
+            }
+
+    annotations = run_async(inspect_annotations)
+
+    prepare = annotations["handoff_current_work"]
+    assert prepare is not None
+    assert prepare.readOnlyHint is False
+    assert prepare.destructiveHint is False
+    assert prepare.idempotentHint is False
+    assert prepare.openWorldHint is False
+
+    commit = annotations["commit_handoff"]
+    assert commit is not None
+    assert commit.readOnlyHint is False
+    assert commit.destructiveHint is False
+    assert commit.idempotentHint is True
+    assert commit.openWorldHint is False
+
+    resolve = annotations["continue_handoff"]
+    assert resolve is not None
+    assert resolve.readOnlyHint is True
+    assert resolve.destructiveHint is False
+    assert resolve.openWorldHint is False
+
+
+def test_mcp_accepts_first_handoff_carrier_in_followup_tool_schemas() -> None:
+    async def handoff_schemas() -> dict[str, dict[str, Any]]:
+        async with Client(create_mcp_server(create_app())) as client:
+            return {
+                tool.name: tool.inputSchema
+                for tool in await client.list_tools()
+                if tool.name in {"continue_handoff", "commit_handoff"}
+            }
+
+    schemas = run_async(handoff_schemas)
+    citation = {"kind": "source", "source_ref": {"name": "content", "source_id": "boundary-1"}}
+    prepared = {
+        "generation": None,
+        "schema": "powercontext.prepared-handoff.v1",
+        "scope_id": "scope-1",
+        "base": None,
+        "content": {
+            "generation": None,
+            "schema": "powercontext.handoff.v1",
+            "objective": "Continue the acceptance test.",
+            "state": [{"text": "The boundary was captured.", "citations": [citation]}],
+            "disposition": "continuable",
+            "next_action": {"text": "Check the followup tools.", "citations": [citation]},
+            "omissions": [],
+        },
+    }
+
+    Draft202012Validator(schemas["continue_handoff"]).validate({
+        "scope_id": "scope-1",
+        "selection": "prepared",
+        "prepared": prepared,
+    })
+    Draft202012Validator(schemas["commit_handoff"]).validate({"scope_id": "scope-1", "handoff": prepared})
+
+
+def test_mcp_describes_review_write_side_effects_for_host_approval() -> None:
+    review_writes = {
+        "approve_artifact_candidate",
+        "reject_artifact_candidate",
+        "revise_artifact_candidate",
+    }
+
+    async def inspect_annotations() -> dict[str, Any]:
+        async with Client(create_mcp_server(create_app())) as client:
+            return {tool.name: tool.annotations for tool in await client.list_tools() if tool.name in review_writes}
+
+    annotations = run_async(inspect_annotations)
+
+    assert set(annotations) == review_writes
+    for name, decision in annotations.items():
+        assert decision is not None, f"{name} carries no annotations for an MCP host to prompt on"
+        assert decision.readOnlyHint is False
+        assert decision.destructiveHint is True
+        assert decision.idempotentHint is True
+        assert decision.openWorldHint is False
 
 
 def test_mcp_exact_entry_tools_use_nested_citations() -> None:

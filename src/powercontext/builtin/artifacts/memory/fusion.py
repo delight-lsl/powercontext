@@ -1,3 +1,17 @@
+# Copyright (c) 2026 OceanBase.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Backend-neutral reciprocal-rank fusion for Memory retrieval."""
 
 from __future__ import annotations
@@ -9,7 +23,7 @@ from powercontext.builtin.artifacts.memory.models import (
     MemoryHit,
     MemoryMatchedBy,
 )
-from powercontext.builtin.artifacts.search import admits_fts_text
+from powercontext.builtin.artifacts.search import AdmissionFloor, admits_fts_text
 
 _RRF_CONSTANT = 60
 _MIN_SEMANTIC_SIMILARITY = 0.3
@@ -20,21 +34,29 @@ _HitIdentity = tuple[str, int, str, str]
 def admit_fts_candidates(
     query: str,
     candidates: Sequence[MemoryChannelHit],
+    *,
+    admission: AdmissionFloor | None = None,
 ) -> tuple[MemoryChannelHit, ...]:
-    """Keep lexical candidates with enough distinct query-term evidence."""
+    """Keep lexical candidates with enough distinct query-term evidence.
 
-    return tuple(candidate for candidate in candidates if admits_fts_text(query, candidate.text))
+    ``admission=None`` reproduces today's behaviour bit for bit.
+    """
+
+    return tuple(candidate for candidate in candidates if admits_fts_text(query, candidate.text, floor=admission))
 
 
 def admit_vector_candidates(
     candidates: Sequence[MemoryChannelHit],
+    *,
+    admission: AdmissionFloor | None = None,
 ) -> tuple[MemoryChannelHit, ...]:
     """Keep unit-vector L2 candidates meeting the semantic similarity baseline."""
 
+    baseline = _MIN_SEMANTIC_SIMILARITY if admission is None else admission.min_semantic_similarity
     return tuple(
         candidate
         for candidate in candidates
-        if candidate.distance is not None and _unit_l2_cosine_similarity(candidate.distance) >= _MIN_SEMANTIC_SIMILARITY
+        if candidate.distance is not None and _unit_l2_cosine_similarity(candidate.distance) >= baseline
     )
 
 

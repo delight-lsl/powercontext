@@ -1,23 +1,50 @@
+# Copyright (c) 2026 OceanBase.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """PowerContext tools exposed to Bub agents."""
 
 from __future__ import annotations
 
 import json
+from contextlib import AbstractAsyncContextManager
 from typing import Any, TypedDict, cast
 
 from bub import tool
 from pydantic import BaseModel, Field
 
 from powercontext.client import PowerContextClient
-from powercontext.http import PrepareContextRequest, RememberMemoryRequest, SearchMemoryRequest
+from powercontext.http import (
+    PrepareContextRequest,
+    RememberMemoryRequest,
+    ScopeBindingKey,
+    SearchMemoryRequest,
+)
 
-from .plugin import STATE_KEY
+from .plugin import STATE_KEY, ContextAssembly, open_client
+from .scope import resolve_scope_id
 
 
 class ToolSettings(TypedDict):
     base_url: str
-    scope_id: str
+    scope_id: str | None
+    explicit_scope_id: str | None
+    binding_keys: list[ScopeBindingKey]
     timeout: float
+    trust_transport_security: bool
+    allow_insecure_http: bool
+    max_bytes: int
+    context_assembly: ContextAssembly | None
 
 
 class SearchInput(BaseModel):
@@ -36,8 +63,9 @@ async def search_memory(param: SearchInput, *, context: Any) -> str:
     """Search durable PowerContext memory."""
 
     settings = _settings(context)
-    request = SearchMemoryRequest(scope_id=settings["scope_id"], query=param.query, limit=param.limit)
-    async with PowerContextClient(settings["base_url"], timeout=settings["timeout"]) as client:
+    async with _client(settings) as client:
+        scope_id = await _scope_id(settings, client)
+        request = SearchMemoryRequest(scope_id=scope_id, query=param.query, limit=param.limit)
         response = await client.search_memory(request)
     if not response.hits:
         return "(no matching PowerContext memory)"
@@ -61,13 +89,14 @@ async def remember_memory(param: RememberInput, *, context: Any) -> str:
     """Save one explicit durable memory for later agent sessions."""
 
     settings = _settings(context)
-    request = RememberMemoryRequest(
-        scope_id=settings["scope_id"],
-        kind=param.kind,
-        text=param.text,
-        reason=param.reason,
-    )
-    async with PowerContextClient(settings["base_url"], timeout=settings["timeout"]) as client:
+    async with _client(settings) as client:
+        scope_id = await _scope_id(settings, client)
+        request = RememberMemoryRequest(
+            scope_id=scope_id,
+            kind=param.kind,
+            text=param.text,
+            reason=param.reason,
+        )
         response = await client.remember_memory(request)
     if response.entry is None:
         return "(PowerContext accepted the memory without an entry receipt)"
@@ -79,8 +108,15 @@ async def prepare_context(query: str, *, context: Any) -> str:
     """Prepare a bounded PowerContext payload for a new question."""
 
     settings = _settings(context)
-    request = PrepareContextRequest(scope_id=settings["scope_id"], query=query)
-    async with PowerContextClient(settings["base_url"], timeout=settings["timeout"]) as client:
+    async with _client(settings) as client:
+        scope_id = await _scope_id(settings, client)
+        assembly = settings.get("context_assembly")
+        request = PrepareContextRequest(
+            scope_id=scope_id,
+            query=query,
+            max_bytes=settings.get("max_bytes", 8000),
+            **({"assembly": assembly} if assembly is not None else {}),
+        )
         response = await client.prepare_context(request)
     return response.content or "(no relevant PowerContext context)"
 
@@ -88,3 +124,25 @@ async def prepare_context(query: str, *, context: Any) -> str:
 def _settings(context: Any) -> ToolSettings:
     settings = context.state[STATE_KEY]
     return cast(ToolSettings, settings)
+
+
+def _client(settings: ToolSettings) -> AbstractAsyncContextManager[PowerContextClient]:
+    return open_client(
+        settings["base_url"],
+        timeout=settings["timeout"],
+        trust_transport_security=settings["trust_transport_security"],
+        allow_insecure_http=settings["allow_insecure_http"],
+    )
+
+
+async def _scope_id(settings: ToolSettings, client: PowerContextClient) -> str:
+    cached_scope_id = settings["scope_id"]
+    if cached_scope_id is not None:
+        return cached_scope_id
+    resolved_scope_id = await resolve_scope_id(
+        client,
+        explicit_scope_id=settings["explicit_scope_id"],
+        binding_keys=settings["binding_keys"],
+    )
+    settings["scope_id"] = resolved_scope_id
+    return resolved_scope_id

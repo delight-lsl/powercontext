@@ -1,3 +1,17 @@
+# Copyright (c) 2026 OceanBase.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Typer shell assembled from installed PowerContext roles."""
 
 from __future__ import annotations
@@ -12,7 +26,7 @@ from powercontext.client.cli import configure_client, register_commands
 
 COMMAND_PROVIDER_GROUP = "powercontext.cli"
 HELP_OPTION_NAMES = ("-h", "--help")
-DOCUMENTATION_URL = "https://github.com/oceanbase/powercontext/tree/main/docs/en/docs"
+DOCUMENTATION_URL = "https://github.com/oceanbase/powercontext/tree/master/docs/en/docs"
 ISSUES_URL = "https://github.com/oceanbase/powercontext/issues"
 
 
@@ -39,6 +53,12 @@ def create_cli(commands: Iterable[typer.Typer] | None = None) -> typer.Typer:
             str | None,
             typer.Option(help="PowerContext Server base URL used by content commands."),
         ] = None,
+        allow_insecure_http: Annotated[
+            bool | None,
+            typer.Option(
+                "--allow-insecure-http/--no-allow-insecure-http", help="Explicitly allow unencrypted remote HTTP."
+            ),
+        ] = None,
         timeout: Annotated[
             float | None,
             typer.Option(min=0.1, help="HTTP timeout in seconds used by content commands."),
@@ -63,6 +83,7 @@ def create_cli(commands: Iterable[typer.Typer] | None = None) -> typer.Typer:
             context,
             server_url=server_url,
             timeout=timeout,
+            allow_insecure_http=allow_insecure_http,
             json_output=json_output,
         )
 

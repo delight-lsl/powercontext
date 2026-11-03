@@ -80,8 +80,15 @@ PowerContext distinguishes these units:
 | --- | --- |
 | Transport request | One external HTTP or MCP protocol request |
 | Application operation | One stable PowerContext operation, such as `search_memory` |
+| Runtime stage | One bounded internal step within an application operation, such as `memory.search` |
 | Background activation | One manual or scheduled Source processing activation |
 | Dependency call | One outbound call to another service or provider |
+
+Runtime stage spans use `stage` as their `powercontext.operation.unit` value. They expose internal latency without
+creating another application operation.
+
+Background activations use `background` as their `powercontext.operation.unit` value. Scheduled activations start their
+own trace rather than inheriting an inbound request context.
 
 A direct HTTP call produces one external request and one application operation. An MCP tool call also produces one
 external request and one application operation. Its internal HTTP bridge does not count as a second external request.

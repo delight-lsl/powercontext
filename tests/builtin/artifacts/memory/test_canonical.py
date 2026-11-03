@@ -1,3 +1,17 @@
+# Copyright (c) 2026 OceanBase.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 from __future__ import annotations
 
 import math
@@ -13,6 +27,7 @@ from powercontext.builtin.artifacts.memory.canonical import (
     memory_content_hash,
     normalize_embedding,
     normalize_kind,
+    normalize_query,
     normalize_reason,
     normalize_text,
     validate_embedding,
@@ -115,6 +130,15 @@ def test_limits_are_measured_after_normalization() -> None:
         validate_identifier("记忆")
     with pytest.raises(ValueError, match="128"):
         validate_identifier("x" * 129)
+
+
+def test_retrieval_query_is_not_held_to_the_entry_body_byte_bound() -> None:
+    """The storage byte bound belongs to durable entry bodies, not transient queries."""
+
+    assert normalize_query("  quarterly review  ") == "quarterly review"
+    assert normalize_query("界" * 2731) == "界" * 2731
+    with pytest.raises(ValueError, match="non-empty"):
+        normalize_query("   ")
 
 
 def test_embedding_validation_rejects_wrong_or_non_finite_vectors() -> None:

@@ -1,3 +1,17 @@
+# Copyright (c) 2026 OceanBase.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Captured exact snapshots used only by explicit external Skill import or fork."""
 
 from __future__ import annotations
@@ -8,7 +22,7 @@ from enum import StrEnum
 from pydantic import BaseModel
 
 from powercontext.builtin.artifacts.skill import ExternalSkillSnapshot
-from powercontext.sources import Source, SourceMaterialization
+from powercontext.sources import AdapterSourceDefinition, Source, SourceMaterialization
 
 EXTERNAL_SKILL_SNAPSHOT_SOURCE_NAME = "external-skill-snapshot"
 
@@ -68,9 +82,11 @@ def _snapshot_id(value: ExternalSkillSnapshotCapture) -> str:
 
 
 EXTERNAL_SKILL_SNAPSHOT_SOURCE_ADAPTER = ExternalSkillSnapshotSourceAdapter()
+EXTERNAL_SKILL_SNAPSHOT_SOURCE_DEFINITION = AdapterSourceDefinition(EXTERNAL_SKILL_SNAPSHOT_SOURCE_ADAPTER)
 
 __all__ = [
     "EXTERNAL_SKILL_SNAPSHOT_SOURCE_ADAPTER",
+    "EXTERNAL_SKILL_SNAPSHOT_SOURCE_DEFINITION",
     "EXTERNAL_SKILL_SNAPSHOT_SOURCE_NAME",
     "ExternalSkillImportMode",
     "ExternalSkillSnapshotCapture",

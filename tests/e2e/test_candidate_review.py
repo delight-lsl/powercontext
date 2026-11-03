@@ -1,3 +1,17 @@
+# Copyright (c) 2026 OceanBase.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 from __future__ import annotations
 
 import asyncio
@@ -20,6 +34,7 @@ from powercontext.http import (
     ApproveArtifactCandidateRequest,
     CandidateFamily,
     CaptureContentSourceRequest,
+    CreateScopeRequest,
     ExperienceProposal,
     GetArtifactCandidateRequest,
     GetExperienceRequest,
@@ -80,7 +95,6 @@ def test_http_sdk_experience_review_vertical_slice(database_kind: str, tmp_path:
     else:
         settings = _settings(tmp_path / "review.db")
     app = create_server_app(settings=settings)
-    scope_id = f"candidate-review-{uuid4()}"
 
     async def scenario() -> None:
         async with (
@@ -90,8 +104,16 @@ def test_http_sdk_experience_review_vertical_slice(database_kind: str, tmp_path:
                 base_url="http://testserver",
             ) as transport,
         ):
-            client = PowerContextClient("http://testserver", http_client=transport)
+            client = PowerContextClient("http://testserver", http_client=transport, trust_transport_security=True)
             capabilities = await client.get_capabilities()
+            scope = await client.create_scope(
+                CreateScopeRequest(
+                    title="Candidate review",
+                    summary="Isolated candidate review acceptance workflow.",
+                    idempotency_key=f"candidate-review-{uuid4()}",
+                )
+            )
+            scope_id = scope.scope_id
             captured = await client.capture_content_source(
                 CaptureContentSourceRequest(
                     scope_id=scope_id,
@@ -208,7 +230,15 @@ def test_http_sdk_experience_review_vertical_slice(database_kind: str, tmp_path:
             )
             historical_skill = await client.get_skill(GetSkillRequest(scope_id=scope_id, artifact=first_skill.artifact))
 
-            assert capabilities.artifact_families == ["memory", "experience", "skill", "handoff"]
+            assert capabilities.artifact_families == [
+                "memory",
+                "topic-memory",
+                "experience",
+                "skill",
+                "handoff",
+                "profile",
+                "prompt",
+            ]
             assert inbox.candidates == [candidate]
             assert prepared.status == "empty"
             assert revised.version == 2
@@ -231,7 +261,7 @@ def test_http_sdk_experience_review_vertical_slice(database_kind: str, tmp_path:
     asyncio.run(scenario())
 
 
-def test_candidate_cli_lists_shows_revises_approves_and_rejects(
+def test_candidate_cli_lists_shows_revises_approves_and_rejects(  # noqa: C901
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -247,7 +277,9 @@ def test_candidate_cli_lists_shows_revises_approves_and_rejects(
                 transport=httpx.ASGITransport(app=app),
                 base_url="http://testserver",
             )
-            self._client = PowerContextClient("http://testserver", http_client=self._transport)
+            self._client = PowerContextClient(
+                "http://testserver", http_client=self._transport, trust_transport_security=True
+            )
             return self
 
         async def __aexit__(self, *_args) -> None:
@@ -278,19 +310,26 @@ def test_candidate_cli_lists_shows_revises_approves_and_rejects(
             assert self._client is not None
             return await self._client.get_skill(request)
 
+        async def download_skill_package(self, request):
+            assert self._client is not None
+            return await self._client.download_skill_package(request)
+
     monkeypatch.setattr(client_cli, "PowerContextClient", InProcessClient)
     cli = create_cli([])
     runner = CliRunner()
     with TestClient(app) as transport:
+        default_scope = transport.get("/v1/scopes/default")
+        default_scope.raise_for_status()
+        scope_id = default_scope.json()["scope_id"]
         captured = transport.post(
             "/v1/sources/content",
-            json={"scope_id": "project", "source_id": "task-1", "content": "bounded evidence"},
+            json={"scope_id": scope_id, "source_id": "task-1", "content": "bounded evidence"},
         ).json()
         proposal = _proposal("Initial lesson.").model_dump(mode="json")
         first = transport.post(
             "/v1/experience/propose",
             json={
-                "scope_id": "project",
+                "scope_id": scope_id,
                 "proposal": proposal,
                 "source_refs": [captured["source"]],
                 "artifact_refs": [],
@@ -299,16 +338,16 @@ def test_candidate_cli_lists_shows_revises_approves_and_rejects(
         second = transport.post(
             "/v1/experience/propose",
             json={
-                "scope_id": "project",
+                "scope_id": scope_id,
                 "proposal": proposal,
                 "source_refs": [captured["source"]],
                 "artifact_refs": [],
             },
         ).json()
-        listed = runner.invoke(cli, ["candidate", "list", "--scope-id", "project"])
+        listed = runner.invoke(cli, ["candidate", "list", "--scope-id", scope_id])
         shown = runner.invoke(
             cli,
-            ["candidate", "show", "--scope-id", "project", first["candidate_id"]],
+            ["candidate", "show", "--scope-id", scope_id, first["candidate_id"]],
         )
         revised = runner.invoke(
             cli,
@@ -317,7 +356,7 @@ def test_candidate_cli_lists_shows_revises_approves_and_rejects(
                 "revise",
                 "experience",
                 "--scope-id",
-                "project",
+                scope_id,
                 "--expected-version",
                 "1",
                 "--situation",
@@ -339,7 +378,7 @@ def test_candidate_cli_lists_shows_revises_approves_and_rejects(
                 "candidate",
                 "approve",
                 "--scope-id",
-                "project",
+                scope_id,
                 "--expected-version",
                 "2",
                 first["candidate_id"],
@@ -351,7 +390,7 @@ def test_candidate_cli_lists_shows_revises_approves_and_rejects(
                 "candidate",
                 "reject",
                 "--scope-id",
-                "project",
+                scope_id,
                 "--expected-version",
                 "1",
                 "--reason",
@@ -361,13 +400,13 @@ def test_candidate_cli_lists_shows_revises_approves_and_rejects(
         )
         approved_head = transport.post(
             "/v1/artifact-candidates/get",
-            json={"scope_id": "project", "candidate_id": first["candidate_id"]},
+            json={"scope_id": scope_id, "candidate_id": first["candidate_id"]},
         ).json()
         experience_ref = approved_head["result_artifact"]
         skill_candidate = transport.post(
             "/v1/skill/propose",
             json={
-                "scope_id": "project",
+                "scope_id": scope_id,
                 "proposal": _skill_proposal().model_dump(mode="json"),
                 "source_refs": [],
                 "artifact_refs": [experience_ref],
@@ -376,7 +415,7 @@ def test_candidate_cli_lists_shows_revises_approves_and_rejects(
         skill_approved = transport.post(
             "/v1/artifact-candidates/approve",
             json={
-                "scope_id": "project",
+                "scope_id": scope_id,
                 "candidate_id": skill_candidate["candidate_id"],
                 "expected_version": 1,
             },
@@ -389,7 +428,7 @@ def test_candidate_cli_lists_shows_revises_approves_and_rejects(
                 "skill",
                 "show",
                 "--scope-id",
-                "project",
+                scope_id,
                 "--revision",
                 str(skill_ref["revision"]),
                 skill_ref["artifact_id"],
@@ -403,7 +442,7 @@ def test_candidate_cli_lists_shows_revises_approves_and_rejects(
                 "--target",
                 "codex",
                 "--scope-id",
-                "project",
+                scope_id,
                 "--revision",
                 str(skill_ref["revision"]),
                 "--destination",

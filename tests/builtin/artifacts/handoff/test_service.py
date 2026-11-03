@@ -1,3 +1,17 @@
+# Copyright (c) 2026 OceanBase.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 from __future__ import annotations
 
 import asyncio
@@ -63,6 +77,7 @@ class _GenerationPipeline:
 class _HandoffBackend(HandoffBackend):
     def __init__(self) -> None:
         self.history: list[Handoff] = []
+        self.published: dict[tuple[str, int], Handoff] = {}
 
     async def create(self, artifact_id: str, draft: HandoffArtifactDraft, /) -> Handoff:
         if self.history:
@@ -75,9 +90,14 @@ class _HandoffBackend(HandoffBackend):
         return self._append(base.artifact_id, draft)
 
     async def get(self, reference: ArtifactRef, /) -> Handoff:
+        if reference.artifact_id != "handoff":
+            return self.published[(reference.artifact_id, reference.revision)]
         return self.history[reference.revision - 1]
 
     async def latest(self, artifact_id: str, /) -> Handoff | None:
+        published = [handoff for (current_id, _), handoff in self.published.items() if current_id == artifact_id]
+        if published:
+            return max(published, key=lambda handoff: handoff.revision)
         if not self.history:
             return None
         assert self.history[-1].artifact_id == artifact_id
@@ -355,6 +375,28 @@ def test_exact_old_revision_remains_historical_input() -> None:
         assert latest.content is not None
         assert latest.content.disposition == "complete"
         assert await service.revisions() == (first, second)
+
+    asyncio.run(scenario())
+
+
+def test_exact_published_revision_is_continuation_input_without_becoming_the_local_head() -> None:
+    async def scenario() -> None:
+        service, backend, _ = _service()
+        published = Handoff(
+            artifact_id="pub_01kcontinuation",
+            revision=1,
+            content=_draft("Published state.").as_content(),
+        )
+        backend.published[(published.artifact_id, published.revision)] = published
+
+        continued = await service.continue_from(published.as_ref())
+
+        assert continued.status == "resolved"
+        assert continued.selection == "exact"
+        assert continued.selected_revision == published.as_ref()
+        assert continued.current_revision == published.as_ref()
+        assert continued.content == published.content
+        assert await service.latest() is None
 
     asyncio.run(scenario())
 

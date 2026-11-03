@@ -1,3 +1,17 @@
+# Copyright (c) 2026 OceanBase.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Built-in runtime configuration, lifecycle, and application services."""
 
 from powercontext.builtin.artifacts.handoff import (
@@ -20,6 +34,14 @@ from powercontext.builtin.artifacts.handoff import (
 )
 from powercontext.builtin.artifacts.memory.models import MemoryChange
 from powercontext.builtin.artifacts.memory.prompts import MemoryExtractionProfile
+from powercontext.builtin.dream.application import DreamApplication, ScopedDreamApplication
+from powercontext.builtin.dream.models import (
+    CreateDreamRunRequest,
+    DreamRun,
+    DreamRunPage,
+    GetDreamRunRequest,
+    ListDreamRunsRequest,
+)
 from powercontext.builtin.review.generation import (
     GeneratedCandidateResult,
     GenerationCapabilityUnavailableError,
@@ -31,6 +53,8 @@ from powercontext.builtin.runtime.application import (
     ExternalSkillApplication,
     HandoffApplication,
     MemoryApplication,
+    RemoteIngestionApplication,
+    RemoteSkillApplication,
     ReviewApplication,
     ScheduledExperienceProcessor,
     ScheduledSourceProcessor,
@@ -42,14 +66,29 @@ from powercontext.builtin.runtime.application import (
     ScopedSkillApplication,
     ScopedSourceApplication,
     ScopedStatisticsApplication,
+    ScopedTopicMemoryApplication,
+    ScopedWorkApplication,
     SkillApplication,
     SourceApplication,
     StatisticsApplication,
+    TopicMemoryApplication,
+    WorkApplication,
+)
+from powercontext.builtin.runtime.artifact_processing import (
+    ArtifactProcessingBinding,
+    ArtifactProcessingSupervisor,
+    ArtifactProcessingSupervisorStatus,
+    ArtifactProcessingWorkAssignment,
+    ArtifactProcessingWorkerCompletion,
+    ArtifactProcessingWorkerFailure,
+    ArtifactProcessingWorkerOutcome,
+    SpawnArtifactProcessingWorkerLauncher,
 )
 from powercontext.builtin.runtime.composition import (
     BuiltinConfigurationError,
     open_builtin_contexts,
     open_builtin_runtime,
+    preflight_builtin_runtime,
 )
 from powercontext.builtin.runtime.config import (
     BuiltinConfig,
@@ -59,10 +98,46 @@ from powercontext.builtin.runtime.config import (
     InferenceConfig,
     RuntimeConfig,
 )
-from powercontext.builtin.runtime.errors import InvalidRuntimeRequestError
+from powercontext.builtin.runtime.context_pack import (
+    ContextPack,
+    ContextPackDelta,
+    ContextPackError,
+    apply_context_pack_delta,
+)
+from powercontext.builtin.runtime.decision_model import (
+    DecisionKind,
+    DecisionModel,
+    DecisionModelOption,
+    DecisionModelRequest,
+    DecisionModelResult,
+    DecisionOutcome,
+    DecisionRequest,
+    DecisionResult,
+    StructuredDecisionModel,
+)
+from powercontext.builtin.runtime.errors import InvalidRuntimeRequestError, TopicMemoryProcessingUnavailableError
+from powercontext.builtin.runtime.memory_write_gate import (
+    DecisionMemoryWriteGate,
+    MemoryWriteAssessment,
+    MemoryWriteGate,
+    MemoryWriteGateRequest,
+    MemoryWriteRejectionCode,
+    MemoryWriteVerdict,
+    build_memory_write_gate,
+)
+from powercontext.builtin.runtime.source_lifecycle import (
+    LifecycleApplication,
+    ScopedLifecycleApplication,
+    SourceLifecycleError,
+    SourceLifecycleEvent,
+)
 from powercontext.builtin.runtime.models import (
     ApproveArtifactCandidateRequest,
     CaptureSource,
+    CommitConnectorCheckpoint,
+    ConnectorCheckpointState,
+    ContextAssembly,
+    ContextAssemblySection,
     ExperienceCandidate,
     ExperienceCandidatePage,
     ExperienceIncubationResult,
@@ -74,6 +149,7 @@ from powercontext.builtin.runtime.models import (
     GetExperienceRequest,
     GetMemoryEntryRequest,
     GetSkillRequest,
+    GetTopicMemoryRequest,
     ImportExternalSkillRequest,
     ListArtifactCandidatesRequest,
     ListExternalSkillsRequest,
@@ -102,10 +178,22 @@ from powercontext.builtin.runtime.models import (
     ReviseMemoryEntryRequest,
     RuntimeCapabilities,
     SearchMemoryRequest,
+    SearchTopicMemoryRequest,
     SkillCandidate,
     SourceReceipt,
+    SubmitSourceObservation,
+    TopicMemoryFlushResult,
 )
-from powercontext.builtin.runtime.protocols import PowerContextProvider
+from powercontext.builtin.runtime.protocols import PowerContextProvider, RemoteIngestion
+from powercontext.builtin.runtime.readiness import (
+    CachedReadinessProbe,
+    ReadinessCheckStatus,
+    ReadinessProbeDefinition,
+    RuntimeReadiness,
+    RuntimeReadinessChecks,
+    RuntimeReadinessStatus,
+    dependency_readiness_probe,
+)
 from powercontext.builtin.statistics import (
     ArtifactInventoryStatistics,
     CandidateFamilyCount,
@@ -126,6 +214,7 @@ from powercontext.builtin.statistics import (
     RecallTokenStatistics,
     RecallTokenValue,
     ResolvedUsagePeriod,
+    ScopeStatistics,
     SourceInventoryStatistics,
     Statistics,
     StatisticsPeriod,
@@ -136,13 +225,41 @@ __all__ = [
     "ActivateHandoff",
     "ApproveArtifactCandidateRequest",
     "ArtifactInventoryStatistics",
+    "ArtifactProcessingBinding",
+    "ArtifactProcessingSupervisor",
+    "ArtifactProcessingSupervisorStatus",
+    "ArtifactProcessingWorkAssignment",
+    "ArtifactProcessingWorkerCompletion",
+    "ArtifactProcessingWorkerFailure",
+    "ArtifactProcessingWorkerOutcome",
     "BuiltinConfig",
     "BuiltinConfigurationError",
     "BuiltinRuntime",
+    "CachedReadinessProbe",
     "CandidateFamilyCount",
     "CandidateInventoryStatistics",
     "CaptureSource",
+    "CommitConnectorCheckpoint",
+    "ConnectorCheckpointState",
+    "ContextAssembly",
+    "ContextAssemblySection",
+    "ContextPack",
+    "ContextPackDelta",
+    "ContextPackError",
+    "CreateDreamRunRequest",
     "DatabaseConfig",
+    "DecisionKind",
+    "DecisionMemoryWriteGate",
+    "DecisionModel",
+    "DecisionModelOption",
+    "DecisionModelRequest",
+    "DecisionModelResult",
+    "DecisionOutcome",
+    "DecisionRequest",
+    "DecisionResult",
+    "DreamApplication",
+    "DreamRun",
+    "DreamRunPage",
     "ExperienceApplication",
     "ExperienceCandidate",
     "ExperienceCandidatePage",
@@ -157,9 +274,11 @@ __all__ = [
     "GeneratedCandidateResult",
     "GenerationCapabilityUnavailableError",
     "GetArtifactCandidateRequest",
+    "GetDreamRunRequest",
     "GetExperienceRequest",
     "GetMemoryEntryRequest",
     "GetSkillRequest",
+    "GetTopicMemoryRequest",
     "Handoff",
     "HandoffActivation",
     "HandoffApplication",
@@ -175,11 +294,13 @@ __all__ = [
     "HandoffResolution",
     "HandoffSourceCitation",
     "HandoffStatement",
+    "LifecycleApplication",
     "ImportExternalSkillRequest",
     "InferenceConfig",
     "InvalidRuntimeRequestError",
     "InventoryStatistics",
     "ListArtifactCandidatesRequest",
+    "ListDreamRunsRequest",
     "ListExternalSkillsRequest",
     "MemoryApplication",
     "MemoryChange",
@@ -198,6 +319,11 @@ __all__ = [
     "MemoryMutationResult",
     "MemoryRevisionChanges",
     "MemorySearchPage",
+    "MemoryWriteAssessment",
+    "MemoryWriteGate",
+    "MemoryWriteGateRequest",
+    "MemoryWriteRejectionCode",
+    "MemoryWriteVerdict",
     "ModelUsageDay",
     "ModelUsageOperation",
     "ModelUsagePurpose",
@@ -211,12 +337,17 @@ __all__ = [
     "PreparedHandoff",
     "ProposeExperienceRequest",
     "ProposeSkillRequest",
+    "ReadinessCheckStatus",
+    "ReadinessProbeDefinition",
     "RecallTokenDay",
     "RecallTokenMeasurement",
     "RecallTokenStatistics",
     "RecallTokenValue",
     "RejectArtifactCandidateRequest",
     "RememberMemoryRequest",
+    "RemoteIngestion",
+    "RemoteIngestionApplication",
+    "RemoteSkillApplication",
     "ResolveExternalSkillRequest",
     "ResolvedUsagePeriod",
     "RetireMemoryEntryRequest",
@@ -227,27 +358,49 @@ __all__ = [
     "ReviseMemoryEntryRequest",
     "RuntimeCapabilities",
     "RuntimeConfig",
+    "RuntimeReadiness",
+    "RuntimeReadinessChecks",
+    "RuntimeReadinessStatus",
     "ScheduledExperienceProcessor",
     "ScheduledSourceProcessor",
+    "ScopeStatistics",
+    "ScopedDreamApplication",
     "ScopedExperienceApplication",
     "ScopedExternalSkillApplication",
     "ScopedHandoffApplication",
+    "ScopedLifecycleApplication",
     "ScopedMemoryApplication",
     "ScopedReviewApplication",
     "ScopedSkillApplication",
     "ScopedSourceApplication",
     "ScopedStatisticsApplication",
+    "ScopedTopicMemoryApplication",
+    "ScopedWorkApplication",
     "SearchMemoryRequest",
+    "SearchTopicMemoryRequest",
     "SkillApplication",
     "SkillCandidate",
     "SkillGenerationOrigin",
     "SourceApplication",
     "SourceInventoryStatistics",
+    "SourceLifecycleError",
+    "SourceLifecycleEvent",
     "SourceReceipt",
+    "SpawnArtifactProcessingWorkerLauncher",
     "Statistics",
     "StatisticsApplication",
     "StatisticsPeriod",
+    "StructuredDecisionModel",
+    "SubmitSourceObservation",
+    "TopicMemoryApplication",
+    "TopicMemoryFlushResult",
+    "TopicMemoryProcessingUnavailableError",
     "UsageStatistics",
+    "WorkApplication",
+    "apply_context_pack_delta",
+    "build_memory_write_gate",
+    "dependency_readiness_probe",
     "open_builtin_contexts",
     "open_builtin_runtime",
+    "preflight_builtin_runtime",
 ]

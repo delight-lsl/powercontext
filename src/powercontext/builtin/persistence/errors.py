@@ -1,3 +1,17 @@
+# Copyright (c) 2026 OceanBase.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Persistence configuration and lifecycle failures."""
 
 from __future__ import annotations
@@ -74,6 +88,15 @@ class InvalidStoredColumnError(RepositoryError, TypeError):
         super().__init__(f"stored {column} column is not {expected}")
 
 
+class InvalidPublicationLineageError(RepositoryError):
+    """Raised when persisted publication provenance cannot form one exact chain."""
+
+    def __init__(self, issue: str) -> None:
+        self.issue = issue
+        detail = "inconsistent content digests" if issue == "digest" else issue
+        super().__init__(f"invalid publication lineage: {detail}")
+
+
 class GenerationConflictError(RepositoryError):
     """Raised when Trigger State compare-and-swap observes another generation."""
 
@@ -82,3 +105,30 @@ class GenerationConflictError(RepositoryError):
         self.expected = expected
         self.actual = actual
         super().__init__(f"trigger state {binding_name!r} generation conflict: expected {expected!r}, found {actual!r}")
+
+
+class ArtifactProcessingLeadershipLostError(RepositoryError):
+    """Raised when a fenced processing transaction no longer owns its term."""
+
+    def __init__(self, supervisor_group: str, holder_id: str, generation: int) -> None:
+        self.supervisor_group = supervisor_group
+        self.holder_id = holder_id
+        self.generation = generation
+        super().__init__(
+            f"artifact processing leadership lost for {supervisor_group!r}: "
+            f"holder={holder_id!r}, generation={generation}"
+        )
+
+
+class ArtifactProcessingWaveIncompleteError(RepositoryError):
+    """Raised when an automatic wave completion is not covered by its Cursor."""
+
+    def __init__(self, binding_name: str, scope_id: str, target: int, cursor: int) -> None:
+        self.binding_name = binding_name
+        self.scope_id = scope_id
+        self.target = target
+        self.cursor = cursor
+        super().__init__(
+            f"artifact processing wave {binding_name!r}/{scope_id!r} is incomplete: "
+            f"cursor {cursor} does not cover target {target}"
+        )
