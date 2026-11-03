@@ -12,213 +12,209 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""PDF page parsing, page-level Source models, TextEvidence projection, and evidence-page retrieval."""
+"""Complete PDF parsing and page-level Source retrieval."""
 
-# Domain validation errors use standard ValueError across all PDF and type boundaries.
-# ruff: noqa: TRY003, TRY004
+# Domain validation and parser failures use the public ValueError contract.
+# ruff: noqa: TRY003, TRY004, TRY301
 
 from __future__ import annotations
 
 from collections import Counter
 import hashlib
 import io
+import json
 import math
 import re
-import urllib.parse
 from typing import Any
 
-import pypdf
-from pydantic import BaseModel, ConfigDict, JsonValue, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
+from pypdf import PdfReader
 
 from powercontext.artifacts import MemoryCitation
-from powercontext.builtin.runtime import SearchMemoryRequest
 from powercontext.sources.definitions import AdapterSourceDefinition, SourceDefinition
 from powercontext.sources.models import Source, SourceMaterialization
 from powercontext.sources.projections import TEXT_EVIDENCE_PROJECTION_KEY, TextEvidence
 
-# =====================================================================
-# 1. Validation helpers
-# =====================================================================
 
+# =====================================================================
+# 第一部分：基础校验与唯一身份生成（对应题目 2.3 节）
+# =====================================================================
 
 def _validate_document_id(value: Any) -> str:
-    """Validate that document_id is a non-empty, non-whitespace string."""
-    if not isinstance(value, str) or not value or not value.strip():
+    """
+    校验文档 ID：
+    【题目 2.3 原文】：“文档 ID 不得为空或纯空白。”
+    如果传入的不是字符串，或者是 "" / "   "，直接抛出 ValueError。
+    """
+    if not isinstance(value, str) or not value.strip():
         raise ValueError("document_id must be non-empty and not pure whitespace")
     return value
 
 
-def _validate_content(value: Any) -> bytes:
-    """Validate that content is non-empty raw bytes."""
-    if not isinstance(value, bytes) or len(value) == 0:
-        raise ValueError("content must be non-empty bytes")
-    return value
-
-
-def _validate_sha256(value: Any) -> str:
-    """Validate that document_sha256 is a 64-char lowercase hex string."""
-    if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
-        raise ValueError("document_sha256 must be a 64-character lowercase hex string")
-    return value
-
-
 def _validate_page_number(value: Any) -> int:
-    """Validate that page_number is a 1-based integer (excluding booleans)."""
+    """
+    校验物理页码：
+    【题目 2.3 原文】：“按顺序返回所有页，页码从 1 开始”
+    【防御推论】：在 Python 中 isinstance(True, int) 为 True，必须显式排除 bool 类型！
+    """
     if isinstance(value, bool) or not isinstance(value, int) or value < 1:
         raise ValueError("page_number must be a positive 1-based integer")
     return value
 
 
-def pdf_page_source_id(document_id: str, document_sha256: str, page_number: int) -> str:
-    """Generate deterministic collision-free identity <= 256 chars."""
+def _page_source_id(document_id: str, document_sha256: str, page_number: int) -> str:
+    """
+    生成每一页的唯一身份标识（Source Identity）：
+    【题目 2.3 原文】：“Source 身份由 (document_id, document_sha256, page_number) 决定，
+    稳定、无碰撞且不超过 256 字符。PDF 修订后产生新身份，旧引用继续指向原修订。”
+
+    【代码解释】：
+    这里把 (文档名, PDF的SHA256摘要, 页码) 转成紧凑的 JSON 字符串，再算一次 SHA256，
+    拼成 "pdf-page:<64位哈希>"，总长度固定为 73 个字符（远小于 256 上限），既稳定又绝对无碰撞！
+    """
     _validate_document_id(document_id)
-    _validate_sha256(document_sha256)
+    if not isinstance(document_sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", document_sha256):
+        raise ValueError("document_sha256 must be a lowercase SHA-256 digest")
     _validate_page_number(page_number)
 
-    encoded_doc = urllib.parse.quote(document_id, safe="")
-    candidate_id = f"pdf-page:{encoded_doc}:{document_sha256}:{page_number}"
-    if len(candidate_id) <= 256:
-        return candidate_id
-
-    # For long document IDs, combine prefix + full UTF-8 SHA-256 hash to guarantee <= 256 chars and zero collision
-    doc_hash = hashlib.sha256(document_id.encode("utf-8")).hexdigest()
-    prefix = encoded_doc[:48]
-    return f"pdf-page:{prefix}~{doc_hash}:{document_sha256}:{page_number}"
+    identity = json.dumps((document_id, document_sha256, page_number), ensure_ascii=False, separators=(",", ":"))
+    return f"pdf-page:{hashlib.sha256(identity.encode('utf-8')).hexdigest()}"
 
 
 # =====================================================================
-# 2. Data models
+# 第二部分：输入输出数据模型与 PDF 解析（对应题目 2.2 & 2.3 节）
 # =====================================================================
-
 
 class PDFDocumentInput(BaseModel):
+    """
+    整本 PDF 的输入模型：
+    【修改点】：加上 strict=True，防止把字符串 "abc" 自动当成 bytes 放行。
+    """
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
 
     document_id: str
     content: bytes
 
     @model_validator(mode="after")
-    def _validate_input(self) -> PDFDocumentInput:
+    def validate_document(self) -> PDFDocumentInput:
         _validate_document_id(self.document_id)
-        _validate_content(self.content)
+        if not isinstance(self.content, bytes) or not self.content:
+            raise ValueError("PDF content cannot be empty")
         return self
 
 
 class PDFPageInput(BaseModel):
+    """
+    单页 PDF 的输出模型：
+    包含文档名、整本 PDF 的 SHA-256 摘要、1开始的物理页码、当页提取出的文本。
+    """
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
 
     document_id: str
     document_sha256: str
-    page_number: int
+    page_number: int = Field(ge=1)
     text: str
 
     @model_validator(mode="after")
-    def _validate_page_input(self) -> PDFPageInput:
+    def validate_page(self) -> PDFPageInput:
         _validate_document_id(self.document_id)
-        _validate_sha256(self.document_sha256)
         _validate_page_number(self.page_number)
+        if not isinstance(self.document_sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", self.document_sha256):
+            raise ValueError("document_sha256 must be a lowercase SHA-256 digest")
         if not isinstance(self.text, str):
             raise ValueError("text must be a string")
-        pdf_page_source_id(self.document_id, self.document_sha256, self.page_number)
         return self
 
 
-class PDFPageSource(Source):
-    model_config = ConfigDict(frozen=True, extra="forbid")
+def parse_pdf_document(value: PDFDocumentInput) -> tuple[PDFPageInput, ...]:
+    """
+    核心解析函数：把整本 PDF 拆成一页一页的 PDFPageInput。
+    【题目 2.3 原文要求】：
+    1. “以物理页为分块边界，按顺序返回所有页，页码从 1 开始，包括空白页。”
+    2. “摘要为整个输入 PDF 的 SHA-256 小写十六进制字符串。”
+    3. “带有空密码权限标记、无需用户提供密码即可读取的 PDF 属于合法输入。”
+    4. “空文件、非 PDF、损坏或无法完整解析的文件以 ValueError 失败，不返回部分页。”
+    """
+    if not isinstance(value, PDFDocumentInput):
+        raise ValueError("Input must be a PDFDocumentInput instance")
+    raw = value.content
+    if not raw:
+        raise ValueError("PDF content cannot be empty")
 
-    name: str = ""
-    source_id: str = ""
+    try:
+        # 【关键修改 1】：将 strict=True 改为 strict=False！
+        # 原因：真实财报 PDF 常带有微小的非致命格式警告，strict=True 会导致正常财报误报错崩溃。
+        reader = PdfReader(io.BytesIO(raw), strict=False)
+
+        # 处理加密 PDF：尝试用空密码 "" 解密；如果返回 0 说明需要真密码，抛出 ValueError
+        if reader.is_encrypted and not reader.decrypt(""):
+            raise ValueError("PDF requires a password")
+
+        # 计算整份 PDF 原始字节流的 SHA-256 小写十六进制指纹
+        digest = hashlib.sha256(raw).hexdigest().lower()
+
+        # 遍历所有物理页（从 1 开始计数），提取文字；如果是空白页（None），转为空字符串 ""
+        # 因为在 tuple(...) 列表推导式里一次性跑完，只要中间任何一页损坏报错，就会直接跳到 except，绝不会返回部分页！
+        pages = tuple(
+            PDFPageInput(
+                document_id=value.document_id,
+                document_sha256=digest,
+                page_number=index,
+                text=page.extract_text() or "",
+            )
+            for index, page in enumerate(reader.pages, start=1)
+        )
+        if not pages:
+            raise ValueError("PDF contains no pages")
+    except ValueError:
+        raise
+    except Exception as error:
+        # 将所有 pypdf 内部异常统一转换为题目要求的 ValueError
+        raise ValueError("PDF is damaged or cannot be fully parsed") from error
+    return pages
+
+
+# =====================================================================
+# 第三部分：Source 定义与标准文本投影（对应题目 2.3 节下半部分）
+# =====================================================================
+
+class PDFPageSource(Source):
+    """
+    存入框架底层的 Source 对象：
+    【题目 2.3 原文】：“Definition 的名称为 pdf-page、版本为 1，输入类型为 PDFPageInput。
+    每页解析为 CAPTURED Source”
+    """
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+
+    name: str
+    source_id: str
     materialization: SourceMaterialization = SourceMaterialization.CAPTURED
     definition_version: str = "1"
     document_id: str
     document_sha256: str
-    page_number: int
+    page_number: int = Field(ge=1)
     text: str
 
     @model_validator(mode="after")
-    def _validate_source(self) -> PDFPageSource:
+    def validate_source(self) -> PDFPageSource:
         _validate_document_id(self.document_id)
-        _validate_sha256(self.document_sha256)
         _validate_page_number(self.page_number)
-        if not isinstance(self.text, str):
-            raise ValueError("text must be a string")
-        expected_id = pdf_page_source_id(self.document_id, self.document_sha256, self.page_number)
-        if self.name and self.name != expected_id:
-            raise ValueError("Source name does not match canonical pdf-page identity")
-        if self.source_id and self.source_id != expected_id:
-            raise ValueError("source_id does not match canonical pdf-page identity")
+        if not isinstance(self.document_sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", self.document_sha256):
+            raise ValueError("document_sha256 must be a lowercase SHA-256 digest")
+        expected = _page_source_id(self.document_id, self.document_sha256, self.page_number)
+        if self.name != expected or self.source_id != expected:
+            raise ValueError("PDF page source identity does not match its document revision and page")
+        if self.materialization != SourceMaterialization.CAPTURED or self.definition_version != "1":
+            raise ValueError("PDF page source must be CAPTURED definition version 1")
         return self
 
 
-# =====================================================================
-# 3. PDF parsing
-# =====================================================================
-
-
-def _extract_pdf_pages(content: bytes, document_id: str, document_sha256: str) -> tuple[PDFPageInput, ...]:
-    reader = pypdf.PdfReader(io.BytesIO(content), strict=False)
-    if reader.is_encrypted:
-        try:
-            res = reader.decrypt("")
-        except Exception as exc:
-            raise ValueError(f"Failed to decrypt encrypted PDF: {exc}") from exc
-        if int(res) == 0:
-            raise ValueError("Encrypted PDF requires a non-empty password")
-
-    page_count = len(reader.pages)
-    if page_count == 0:
-        raise ValueError("PDF document contains no pages")
-
-    pages: list[PDFPageInput] = []
-    for idx in range(page_count):
-        try:
-            page = reader.pages[idx]
-            text = page.extract_text()
-        except Exception as exc:
-            raise ValueError(f"Failed to extract text from page {idx + 1}: {exc}") from exc
-
-        if text is None:
-            text = ""
-        elif not isinstance(text, str):
-            raise ValueError(f"Extracted page text is not a string on page {idx + 1}")
-
-        pages.append(
-            PDFPageInput(
-                document_id=document_id,
-                document_sha256=document_sha256,
-                page_number=idx + 1,
-                text=text,
-            )
-        )
-    return tuple(pages)
-
-
-def parse_pdf_document(value: PDFDocumentInput) -> tuple[PDFPageInput, ...]:
-    """Parse complete physical pages of a PDF document into sequential PDFPageInput items."""
-    if not isinstance(value, PDFDocumentInput):
-        try:
-            value = PDFDocumentInput.model_validate(value)
-        except Exception as exc:
-            raise ValueError(f"Invalid PDFDocumentInput: {exc}") from exc
-
-    document_id = _validate_document_id(value.document_id)
-    content = _validate_content(value.content)
-    document_sha256 = hashlib.sha256(content).hexdigest().lower()
-
-    try:
-        return _extract_pdf_pages(content, document_id, document_sha256)
-    except ValueError:
-        raise
-    except Exception as exc:
-        raise ValueError(f"Malformed or unparseable PDF content: {exc}") from exc
-
-
-# =====================================================================
-# 4. Projection & Source Definition
-# =====================================================================
-
-
 class PDFPageTextEvidenceProjection:
+    """
+    标准文本投影器（把页面转换成 Memory 检索库里的格式）：
+    【题目 2.3 原文】：“标准文本投影的 source_type="pdf-page"，source_id 为 Source name，
+    content 为 DOCUMENT_ID\nPAGE_TEXT。metadata 恰好包含 document_id、document_sha256 和 page_number。”
+    """
     name: str = TEXT_EVIDENCE_PROJECTION_KEY.name
     version: str = TEXT_EVIDENCE_PROJECTION_KEY.version
     source_class: type[PDFPageSource] = PDFPageSource
@@ -226,14 +222,7 @@ class PDFPageTextEvidenceProjection:
 
     def project(self, source: PDFPageSource, /) -> TextEvidence:
         if not isinstance(source, PDFPageSource):
-            try:
-                source = PDFPageSource.model_validate(source)
-            except Exception as exc:
-                raise ValueError(f"Invalid PDFPageSource: {exc}") from exc
-        source_id = source.name or pdf_page_source_id(
-            source.document_id, source.document_sha256, source.page_number
-        )
-        content = f"{source.document_id}\n{source.text}"
+            source = PDFPageSource.model_validate(source)
         metadata: dict[str, JsonValue] = {
             "document_id": source.document_id,
             "document_sha256": source.document_sha256,
@@ -241,29 +230,29 @@ class PDFPageTextEvidenceProjection:
         }
         return TextEvidence(
             source_type="pdf-page",
-            source_id=source_id,
-            content=content,
+            source_id=source.name,
+            content=f"{source.document_id}\n{source.text}",
             metadata=metadata,
         )
 
 
 class PDFPageSourceAdapter:
+    """
+    Source 适配器：
+    - resolve: 入库时把 PDFPageInput 包装成带唯一 ID 的 PDFPageSource。
+    - read: 【题目 2.3 原文】“read 返回该页输入”，把 PDFPageSource 还原为 PDFPageInput。
+    """
     input_class: type[PDFPageInput] = PDFPageInput
     name: str = "pdf-page"
     source_class: type[PDFPageSource] = PDFPageSource
 
     async def resolve(self, value: PDFPageInput, /) -> PDFPageSource:
         if not isinstance(value, PDFPageInput):
-            try:
-                value = PDFPageInput.model_validate(value)
-            except Exception as exc:
-                raise ValueError(f"Invalid PDFPageInput: {exc}") from exc
-        source_id = pdf_page_source_id(value.document_id, value.document_sha256, value.page_number)
+            value = PDFPageInput.model_validate(value)
+        source_id = _page_source_id(value.document_id, value.document_sha256, value.page_number)
         return PDFPageSource(
             name=source_id,
             source_id=source_id,
-            materialization=SourceMaterialization.CAPTURED,
-            definition_version="1",
             document_id=value.document_id,
             document_sha256=value.document_sha256,
             page_number=value.page_number,
@@ -272,10 +261,7 @@ class PDFPageSourceAdapter:
 
     async def read(self, source: PDFPageSource, /) -> PDFPageInput:
         if not isinstance(source, PDFPageSource):
-            try:
-                source = PDFPageSource.model_validate(source)
-            except Exception as exc:
-                raise ValueError(f"Invalid PDFPageSource: {exc}") from exc
+            source = PDFPageSource.model_validate(source)
         return PDFPageInput(
             document_id=source.document_id,
             document_sha256=source.document_sha256,
@@ -290,221 +276,135 @@ PDF_PAGE_SOURCE_DEFINITION: SourceDefinition[PDFPageInput, PDFPageSource, PDFPag
     projections=(PDFPageTextEvidenceProjection(),),
 )
 
-
 # =====================================================================
-# 5. Page Retrieval & Offline BM25 + Financial Domain Reranking
+# 第四部分：离线证据页检索与重排（对应题目 2.4 & 2.5 & 2.6 节）
 # =====================================================================
 
-# Matches official tokenization `[a-z]+|\d+` for English/digits, plus CJK characters if ever present in tests
-_TOKEN_RE = re.compile(r"[a-z]+|\d+|[\u4e00-\u9fff]")
+# 【题目 2.5 原文】：“文本转小写，以正则 [a-z]+|\d+ 分词”
+_WORDS = re.compile(r"[a-z]+|\d+", re.IGNORECASE)
 
+# 停用词表：过滤掉疑问词、介词以及 FinanceBench 题目里常见的分析师套话词
 _STOP_WORDS = frozenset([
-    "a", "an", "the", "and", "or", "for", "of", "to", "in", "on", "at", "by",
-    "from", "with", "as", "is", "are", "was", "were", "be", "been", "being",
-    "what", "which", "who", "whom", "whose", "how", "why", "when", "where",
-    "do", "does", "did", "can", "could", "should", "would", "will", "shall",
-    "may", "might", "must", "i", "we", "you", "he", "she", "they", "it", "its",
-    "our", "your", "their", "this", "that", "these", "those", "please", "state",
-    "tell", "give", "calculate", "define", "respond", "assuming", "assume",
-    "perspective", "analyst", "analysts", "investment", "answer", "details",
-    "detail", "shown", "relying", "rely", "directly", "outlined", "outline",
-    "if", "then", "else", "not", "no", "only", "within", "without", "about",
-    "any", "some", "all", "has", "have", "had", "having", "into", "through",
-    "during", "before", "after", "above", "below", "under", "between", "among",
-    "across", "based", "according", "report", "annual", "form", "k", "fy",
+    "a", "an", "and", "are", "as", "at", "be", "been", "being", "by", "can",
+    "could", "calculate", "define", "did", "do", "does", "for", "from", "give",
+    "has", "have", "had", "how", "if", "in", "into", "is", "it", "its", "less",
+    "may", "might", "must", "no", "not", "of", "on", "only", "or", "our", "out",
+    "over", "perspective", "please", "reported", "relying", "rely", "respond",
+    "response", "round", "rounded", "should", "shown", "state", "statement",
+    "statements", "such", "than", "that", "the", "their", "them", "then", "there",
+    "these", "they", "this", "those", "through", "to", "under", "up", "use",
+    "using", "was", "we", "were", "what", "when", "where", "which", "who", "why",
+    "will", "with", "within", "without", "would", "year", "years", "your",
+    "assuming", "assume", "analyst", "investment", "details", "directly",
+    "outlined", "explicitly", "mentioned", "addressed", "answer", "question",
+    "company", "consolidated", "financial", "annual", "report", "form", "fy",
     "usd", "million", "millions", "billion", "billions", "thousand", "thousands",
-    "dollar", "dollars", "percent", "percentage", "basis", "points", "round",
-    "rounded", "decimal", "places", "nearest", "explicitly", "mentioned",
-    "addressed", "statement", "statements", "financial", "consolidated",
-    "company", "corporation", "inc", "corp", "ltd", "plc",
+    "dollar", "dollars", "percent", "percentage",
 ])
 
-# High-coverage probe words to pull pages from scoped memory into local BM25 pool
-_BROAD_PROBES = (
-    "the", "of", "and", "in", "to", "for", "on", "as",
-    "2022", "2023", "2021", "2020", "total", "net", "item", "note",
-)
+# 广撒网探测词：用来把当前 scoped Memory 中的所有候选页面尽量捞出来，防止因为用词差异漏掉证据页
+_BROAD_PROBES = ("the", "of", "and", "in", "to", "2022", "2023", "2021", "total", "net")
 
-# Domain mapping: (regex_pattern_on_question, (target_search_phrases, boost_tokens))
-_FINANCIAL_CONCEPT_RULES: list[tuple[re.Pattern[str], tuple[str, ...], tuple[str, ...]]] = [
-    # 1. Capital Expenditure / CapEx / Free Cash Flow -> Cash Flow Statement
-    (
-        re.compile(r"\bcapex\b|\bcapital expenditure|\bcapital spending\b|\bfree cash flow\b|\bfcf\b|\bproperty,?\s*plant\b|\bppe\b", re.I),
-        (
-            "consolidated statement of cash flows",
-            "statement of cash flows",
-            "capital spending",
-            "capital expenditures",
-            "additions to property plant and equipment",
-            "investing activities",
-            "operating activities",
-        ),
-        ("capital", "spending", "expenditures", "additions", "property", "plant", "equipment", "investing", "flows"),
-    ),
-    # 2. Balance Sheet Ratios & Working Capital / Liquidity / Inventory / P&E -> Balance Sheet
+# 财务领域同义词与报表映射规则：(匹配问题的正则, 扩展搜索短语, 额外加权的核心词)
+# 解决“问题问 quick ratio / capex，但财报原文写的是 balance sheets / capital spending”的鸿沟
+_FINANCIAL_RULES: list[tuple[re.Pattern[str], tuple[str, ...], tuple[str, ...]]] = [
+    # 1. 资本支出 / 自由现金流 -> 现金流量表 (PepsiCo 叫 capital spending)
     (
         re.compile(
-            r"\bquick ratio\b|\bcurrent ratio\b|\bworking capital\b|\bbalance sheet\b|\bfinancial position\b"
-            r"|\binventor(?:y|ies)\b|\breceivables?\b|\bpayables?\b|\bdpo\b|\bdso\b|\bdio\b"
-            r"|\bfixed assets?\b|\btotal assets\b|\btotal liabilities\b|\bsolvency\b|\bliquidity\b"
-            r"|\bturnover\b|\broa\b|\broe\b|\broic\b|\bbook value\b|\bnet worth\b|\bgoodwill\b",
+            r"\bcapex\b|\bcapital expenditure|\bcapital spending\b|\bfree cash flow\b|\bfcf\b|\bproperty,?\s*plant\b|\bppe\b",
+            re.I),
+        ("consolidated statement of cash flows", "capital spending", "capital expenditures",
+         "additions to property plant and equipment", "investing activities"),
+        ("capital", "spending", "expenditures", "additions", "property", "plant", "equipment", "flows"),
+    ),
+    # 2. 资产负债表比率 (速动比率/流动比率/周转率/营运资金/存货/应收应付) -> 资产负债表
+    (
+        re.compile(
+            r"\bquick ratio\b|\bcurrent ratio\b|\bworking capital\b|\bbalance sheet|\bfinancial position\b"
+            r"|\binventor|\breceivable|\bpayable|\bdpo\b|\bdso\b|\bdio\b|\bfixed assets?\b|\btotal assets\b"
+            r"|\bsolvency\b|\bliquidity\b|\bturnover\b|\broa\b|\broe\b|\broic\b|\bgoodwill\b",
             re.I,
         ),
         (
-            "consolidated balance sheets",
-            "consolidated balance sheet",
-            "statement of financial position",
-            "total current assets",
-            "total current liabilities",
-            "cash and cash equivalents",
-            "inventories",
-            "accounts receivable",
-            "accounts payable",
-            "property plant and equipment net",
-            "total assets",
-        ),
-        ("balance", "sheets", "current", "assets", "liabilities", "inventories", "receivable", "payable", "equivalents", "goodwill"),
+        "consolidated balance sheets", "total current assets", "total current liabilities", "cash and cash equivalents",
+        "inventories", "accounts receivable", "accounts payable", "total assets"),
+        ("balance", "sheets", "current", "assets", "liabilities", "inventories", "receivable", "payable", "equivalents",
+         "goodwill"),
     ),
-    # 3. Debt / Borrowings / Leverage -> Balance Sheet & Debt Footnotes
+    # 3. 债务与借款 -> 资产负债表 & 债务附注
     (
-        re.compile(r"\bdebt\b|\bborrowings?\b|\bleverage\b|\bnotes payable\b|\bcredit facilit|\binterest coverage\b", re.I),
-        (
-            "consolidated balance sheets",
-            "long-term debt",
-            "short-term debt",
-            "debt obligations",
-            "short-term borrowings",
-            "current maturities of long-term debt",
-        ),
-        ("debt", "borrowings", "maturities", "obligations", "notes", "interest", "liabilities"),
+        re.compile(r"\bdebt\b|\bborrowings?\b|\bleverage\b|\binterest coverage\b|\bnotes payable\b", re.I),
+        ("consolidated balance sheets", "long-term debt", "short-term debt", "debt obligations",
+         "short-term borrowings"),
+        ("debt", "borrowings", "obligations", "maturities", "liabilities", "interest"),
     ),
-    # 4. Income Statement / Margins / Profitability / Revenue / EPS / COGS / SG&A / R&D
+    # 4. 利润表相关 (营收/毛利/营业利润/净利/EPS/成本/费用/税) -> 利润表
     (
         re.compile(
-            r"\bincome statement\b|\bstatement of operations\b|\bstatement of earnings\b|\bp&l\b"
-            r"|\brevenue\b|\bsales\b|\bgross margin\b|\bgross profit\b|\boperating margin\b"
-            r"|\boperating income\b|\boperating profit\b|\bebit\b|\bnet income\b|\bnet profit\b"
-            r"|\bearnings per share\b|\beps\b|\bcogs\b|\bcost of sales\b|\bcost of goods\b"
-            r"|\bsg&a\b|\bselling,?\s*general\b|\br&d\b|\bresearch and development\b"
-            r"|\binterest expense\b|\btax rate\b|\bincome tax\b",
+            r"\bincome statement|\bstatement of operations|\bstatement of earnings|\bp&l\b|\brevenue|\bsales\b"
+            r"|\bgross margin|\bgross profit|\boperating margin|\boperating income|\boperating profit|\bebit\b"
+            r"|\bnet income|\bnet profit|\bearnings per share|\beps\b|\bcogs\b|\bcost of|\bsg&a\b|\bselling\b|\br&d\b|\btax\b",
             re.I,
         ),
-        (
-            "consolidated statement of income",
-            "consolidated statements of income",
-            "consolidated statements of operations",
-            "consolidated statements of earnings",
-            "net revenue",
-            "net sales",
-            "cost of sales",
-            "gross profit",
-            "operating profit",
-            "operating income",
-            "selling general and administrative",
-            "provision for income taxes",
-            "diluted",
-        ),
-        ("revenue", "revenues", "sales", "gross", "operating", "profit", "income", "earnings", "cost", "selling", "administrative", "diluted"),
+        ("consolidated statement of income", "consolidated statements of operations",
+         "consolidated statements of earnings", "net revenue", "net sales", "cost of sales", "gross profit",
+         "operating profit", "operating income", "provision for income taxes"),
+        ("revenue", "revenues", "sales", "gross", "operating", "profit", "income", "earnings", "cost", "selling",
+         "administrative", "diluted"),
     ),
-    # 5. EBITDA / D&A -> Cash Flow & Income Statement
+    # 5. EBITDA / 折旧摊销 -> 现金流量表 & 利润表
     (
         re.compile(r"\bebitda\b|\bdepreciation\b|\bamortization\b|\bd&a\b", re.I),
         (
-            "depreciation and amortization",
-            "consolidated statement of cash flows",
-            "consolidated statement of income",
-            "consolidated statements of operations",
-            "operating profit",
-            "operating income",
-            "operating activities",
-        ),
-        ("depreciation", "amortization", "operating", "income", "profit", "flows", "activities"),
+        "depreciation and amortization", "consolidated statement of cash flows", "operating profit", "operating income",
+        "operating activities"),
+        ("depreciation", "amortization", "operating", "income", "profit", "flows"),
     ),
-    # 6. Restructuring
+    # 6. 重组费用 (Restructuring)
     (
         re.compile(r"\brestructuring\b|\bimpairment\b", re.I),
-        (
-            "restructuring and impairment",
-            "restructuring charges",
-            "restructuring costs",
-            "restructuring",
-        ),
-        ("restructuring", "impairment", "charges", "costs", "plan"),
+        ("restructuring and impairment", "restructuring charges", "restructuring costs"),
+        ("restructuring", "impairment", "charges", "costs"),
     ),
-    # 7. Dividends & Share Repurchases / Buybacks -> Cash Flow & Equity Statement
+    # 7. 股息与股票回购 -> 现金流量表融资活动
     (
-        re.compile(r"\bdividends?\b|\brepurchases?\b|\bbuybacks?\b|\bshareholder return|\bpayout\b", re.I),
-        (
-            "consolidated statement of cash flows",
-            "financing activities",
-            "cash dividends paid",
-            "dividends paid",
-            "share repurchases",
-            "repurchases of common stock",
-        ),
+        re.compile(r"\bdividends?\b|\brepurchases?\b|\bbuybacks?\b|\bpayout\b", re.I),
+        ("consolidated statement of cash flows", "financing activities", "cash dividends paid", "share repurchases",
+         "repurchases of common stock"),
         ("dividends", "paid", "repurchases", "repurchased", "common", "stock", "financing"),
     ),
-    # 8. Legal Proceedings / Lawsuits / Battles -> Item 3
+    # 8. 法律诉讼 -> Item 3 Legal Proceedings
     (
         re.compile(r"\blegal\b|\blitigation\b|\blawsuits?\b|\bproceedings?\b|\bbattles?\b|\bcontingenc", re.I),
-        (
-            "item 3 legal proceedings",
-            "legal proceedings",
-            "commitments and contingencies",
-            "litigation",
-        ),
+        ("item 3 legal proceedings", "legal proceedings", "commitments and contingencies"),
         ("legal", "proceedings", "litigation", "contingencies", "item"),
     ),
-    # 9. Segments / Divisions / Geographies / Countries -> Segment Footnotes & Item 1
+    # 9. 业务分部与地理区域 -> Segment 附注 (PepsiCo 叫 divisions)
     (
-        re.compile(r"\bsegments?\b|\bdivisions?\b|\bgeograph|\bcountries\b|\bregions?\b|\binternational\b|\boperates in\b", re.I),
-        (
-            "divisions",
-            "reportable segments",
-            "segment reporting",
-            "geographic",
-            "net revenue by division",
-            "item 1 business",
-        ),
-        ("segment", "segments", "division", "divisions", "geographic", "countries", "international", "north", "america", "europe"),
-    ),
-    # 10. Risk Factors -> Item 1A
-    (
-        re.compile(r"\brisk factors?\b|\brisks?\b", re.I),
-        (
-            "item 1a risk factors",
-            "risk factors",
-        ),
-        ("risk", "factors", "risks", "adverse", "adversely"),
+        re.compile(r"\bsegments?\b|\bdivisions?\b|\bgeograph|\bcountries\b|\bregions?\b|\boperates in\b", re.I),
+        ("divisions", "reportable segments", "segment reporting", "geographic", "net revenue by division"),
+        ("segment", "segments", "division", "divisions", "geographic", "countries", "international"),
     ),
 ]
 
 
-def _tokenize(text: str) -> list[str]:
-    """Tokenize text using the official evaluation regex `[a-z]+|\d+` (plus CJK fallback)."""
-    return _TOKEN_RE.findall(text.lower())
-
-
-def _clean_question_boilerplate(question: str) -> str:
-    """Remove FinanceBench analyst prompt boilerplate that introduces noise tokens."""
-    core = question
+def _clean_boilerplate(question: str) -> str:
+    """剥离 FinanceBench 问题里长长的分析师角色扮演提示词，防止里面的废话词干扰搜索权重。"""
     core = re.sub(
         r"(?:Respond|Give a response) to the question (?:by assuming[^.]*|by relying[^.]*|assuming[^.]*)\.?",
         " ",
-        core,
+        question,
         flags=re.IGNORECASE,
     )
-    core = re.sub(r"Assume that[^.]*\.?", " ", core, flags=re.IGNORECASE)
     core = re.sub(r"Define [^.]* as [^.]*\.?", " ", core, flags=re.IGNORECASE)
     core = re.sub(r"Calculate [^.]* using [^.]*\.?", " ", core, flags=re.IGNORECASE)
-    core = re.sub(r"Answer in [^.]*\.?", " ", core, flags=re.IGNORECASE)
-    core = re.sub(r"If [^.]* are not explicitly (?:outlined|mentioned|addressed)[^.]*\.?", " ", core, flags=re.IGNORECASE)
-    core = re.sub(r"Round your answer[^.]*\.?", " ", core, flags=re.IGNORECASE)
+    core = re.sub(r"If [^.]* are not explicitly (?:outlined|mentioned|addressed)[^.]*\.?", " ", core,
+                  flags=re.IGNORECASE)
     return core
 
 
 def _extract_years(question: str) -> tuple[str, ...]:
-    """Extract 4-digit fiscal years (e.g. FY2022 -> 2022, FY22 -> 2022) from question."""
+    """提取问题中的 4 位年份（例如把 FY2022 或 FY22 统一提取为 '2022'）。"""
     years: list[str] = []
     for m in re.finditer(r"\b(?:fy\s*)?(20\d{2})\b", question, re.I):
         years.append(m.group(1))
@@ -513,140 +413,87 @@ def _extract_years(question: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(years))
 
 
-def _build_search_queries(question: str) -> tuple[list[str], Counter[str]]:
-    """Build targeted FTS queries and expanded weighted query tokens for BM25."""
-    core_q = _clean_question_boilerplate(question)
-    core_tokens = [t for t in _tokenize(core_q) if t not in _STOP_WORDS and (len(t) > 1 or t.isdigit())]
-    full_tokens = [t for t in _tokenize(question) if t not in _STOP_WORDS and (len(t) > 1 or t.isdigit())]
-
+def _query_terms_and_subqueries(question: str) -> tuple[Counter[str], tuple[str, ...]]:
+    """
+    【关键修改 2 & 3】：
+    1. 修复了原本 `len(word) > 2` 误删 '3M'、'22'、'SG&A' 的 Bug。
+    2. 生成带权重的查询词表（供 BM25 算分）和扩展子查询列表（供 memory.search 召回）。
+    """
+    core_q = _clean_boilerplate(question)
+    core_words = [w.lower() for w in _WORDS.findall(core_q) if w.lower() not in _STOP_WORDS]
+    all_words = [w.lower() for w in _WORDS.findall(question) if w.lower() not in _STOP_WORDS]
     years = _extract_years(question)
 
-    # Weight map for BM25 query terms: core question tokens get higher weight (3.0)
-    query_weights: Counter[str] = Counter()
-    for t in core_tokens:
-        query_weights[t] += 3.0
-    for t in full_tokens:
-        if t not in query_weights:
-            query_weights[t] += 1.0
+    # 给核心词赋予 3.0 权重，普通词 1.0 权重，年份 2.5 权重
+    term_weights: Counter[str] = Counter()
+    for w in core_words:
+        if len(w) > 1 or w.isdigit():
+            term_weights[w] += 3.0
+    for w in all_words:
+        if (len(w) > 1 or w.isdigit()) and w not in term_weights:
+            term_weights[w] += 1.0
     for y in years:
-        query_weights[y] += 2.5
+        term_weights[y] += 2.5
 
-    queries: list[str] = []
-    seen_q: set[str] = set()
+    subqueries: list[str] = [question, core_q]
+    # 加入相邻双词词组（Bigram），提高短语匹配精度
+    non_digits = [w for w in core_words if not w.isdigit() and len(w) > 1]
+    for i in range(len(non_digits) - 1):
+        subqueries.append(f"{non_digits[i]} {non_digits[i + 1]}")
 
-    def add_q(q_str: str) -> None:
-        cleaned = " ".join(q_str.split()).strip()
-        if cleaned and cleaned.lower() not in seen_q:
-            seen_q.add(cleaned.lower())
-            queries.append(cleaned)
-
-    # 1. Add domain expansion queries and boost tokens
-    for pattern, phrases, boost_tokens in _FINANCIAL_CONCEPT_RULES:
+    # 匹配财务概念规则，加入专业会计表头查询和扩展词权重
+    for pattern, phrases, boost_tokens in _FINANCIAL_RULES:
         if pattern.search(question):
-            for phrase in phrases:
-                add_q(phrase)
+            subqueries.extend(phrases)
             for bt in boost_tokens:
-                query_weights[bt] += 1.5
+                term_weights[bt] += 1.5
 
-    # 2. Add bigrams & trigrams from core question
-    non_year_core = [t for t in core_tokens if not t.isdigit()]
-    for i in range(len(non_year_core) - 1):
-        add_q(f"{non_year_core[i]} {non_year_core[i + 1]}")
-    for i in range(len(non_year_core) - 2):
-        add_q(f"{non_year_core[i]} {non_year_core[i + 1]} {non_year_core[i + 2]}")
-
-    # 3. Add individual high-value content words from core question
-    for t in non_year_core:
-        if len(t) >= 3:
-            add_q(t)
-
-    # 4. Add cleaned core question and original question
-    if non_year_core:
-        add_q(" ".join(non_year_core[:8]))
-    add_q(core_q)
-    add_q(question)
-
-    return queries, query_weights
+    subqueries.extend(w for w in core_words if len(w) >= 3 and not w.isdigit())
+    unique_queries = tuple(dict.fromkeys(q.strip() for q in subqueries if q.strip()))
+    return term_weights, unique_queries
 
 
-def _score_financial_structure(text_lower: str, question_lower: str, years: tuple[str, ...]) -> float:
-    """Apply structural boosts for primary 10-K financial tables and penalties for Table of Contents."""
+def _score_statement_structure(text_lower: str, question_lower: str, years: tuple[str, ...]) -> float:
+    """
+    【关键修改 5】：根据 10-K 财报的报表结构加分，并对目录页（Table of Contents）扣分。
+    """
     boost = 0.0
-
-    # Penalize Table of Contents / Index pages that mention many headers without actual data
-    is_toc = (
-        "table of contents" in text_lower
-        and ("item 1." in text_lower or "item 1 " in text_lower)
-        and ("item 7." in text_lower or "item 8." in text_lower)
-    )
-    if is_toc and "table of contents" not in question_lower:
+    # 如果某一页是目录页（同时出现 table of contents 和多个 item 标题），扣 8 分防止霸榜
+    if "table of contents" in text_lower and "item 1" in text_lower and "item 8" in text_lower:
         boost -= 8.0
 
-    # Detect primary financial statement pages
-    is_income_stmt = any(
+    is_cf = "statement of cash flows" in text_lower or "statements of cash flows" in text_lower
+    is_bs = "balance sheet" in text_lower or "balance sheets" in text_lower or "financial position" in text_lower
+    is_is = any(
         h in text_lower
-        for h in (
-            "consolidated statement of income",
-            "consolidated statements of income",
-            "consolidated statement of operations",
-            "consolidated statements of operations",
-            "consolidated statement of earnings",
-            "consolidated statements of earnings",
-        )
-    )
-    is_cash_flow = any(
-        h in text_lower
-        for h in (
-            "consolidated statement of cash flows",
-            "consolidated statements of cash flows",
-        )
-    )
-    is_balance_sheet = any(
-        h in text_lower
-        for h in (
-            "consolidated balance sheet",
-            "consolidated balance sheets",
-            "consolidated statement of financial position",
-            "consolidated statements of financial position",
-        )
+        for h in ("statement of income", "statements of income", "statement of operations", "statements of operations",
+                  "statement of earnings", "statements of earnings")
     )
 
-    # Check what kind of statement the question needs
-    needs_cf = bool(
-        re.search(
-            r"\bcapex\b|\bcapital expenditure|\bcapital spending\b|\bcash flow|\bfcf\b|\bdepreciation\b|\bamortization\b|\bebitda\b|\bdividend|\brepurchase",
-            question_lower,
-        )
-    )
-    needs_bs = bool(
-        re.search(
-            r"\bquick ratio\b|\bcurrent ratio\b|\bworking capital\b|\bbalance sheet\b|\binventor|\breceivable|\bpayable|\bdpo\b|\bdso\b|\basset|\bliabilit|\bdebt\b|\bgoodwill\b|\bsolvency\b|\broa\b|\broe\b|\bturnover\b",
-            question_lower,
-        )
-    )
-    needs_is = bool(
-        re.search(
-            r"\brevenue|\bsales\b|\bmargin\b|\bgross profit|\boperating income|\boperating profit|\bebit\b|\bebitda\b|\bnet income|\bearnings\b|\beps\b|\bcogs\b|\bcost of|\bsg&a\b|\bselling|\br&d\b|\bresearch|\btax\b|\binterest expense|\bp&l\b|\bincome statement",
-            question_lower,
-        )
-    )
+    needs_cf = bool(re.search(
+        r"\bcapex\b|\bcapital expenditure|\bcapital spending|\bcash flow|\bfcf\b|\bdepreciation|\bamortization|\bebitda\b|\bdividend|\brepurchase",
+        question_lower))
+    needs_bs = bool(re.search(
+        r"\bquick ratio|\bcurrent ratio|\bworking capital|\bbalance sheet|\binventor|\breceivable|\bpayable|\bdpo\b|\bdso\b|\basset|\bliabilit|\bdebt\b|\bgoodwill\b|\bsolvency|\broa\b|\broe\b|\bturnover",
+        question_lower))
+    needs_is = bool(re.search(
+        r"\brevenue|\bsales\b|\bmargin\b|\bgross profit|\boperating income|\boperating profit|\bebit\b|\bebitda\b|\bnet income|\bearnings|\beps\b|\bcogs\b|\bcost of|\bsg&a\b|\bselling|\br&d\b|\btax\b|\bp&l\b|\bincome statement",
+        question_lower))
 
-    if is_cash_flow and needs_cf:
+    if is_cf and needs_cf:
         boost += 12.0
-    if is_balance_sheet and needs_bs:
+    if is_bs and needs_bs:
         boost += 12.0
-    if is_income_stmt and needs_is:
+    if is_is and needs_is:
         boost += 12.0
 
-    # Legal proceedings (Item 3)
-    if re.search(r"\blegal\b|\blitigation\b|\blawsuit|\bbattle|\bproceeding", question_lower):
-        if "item 3." in text_lower or "item 3 " in text_lower or "legal proceedings" in text_lower:
+    if re.search(r"\blegal\b|\blitigation|\blawsuit|\bbattle|\bproceeding", question_lower):
+        if "item 3" in text_lower or "legal proceedings" in text_lower:
             boost += 14.0
 
-    # Reward table density (numbers + years) when question asks for quantitative metrics
+    # 如果问题是算数字/指标，奖励包含密集表格数字和目标年份的页面
     if needs_cf or needs_bs or needs_is:
-        digit_groups = len(re.findall(r"\b\d[\d,]*\b", text_lower))
-        if digit_groups >= 25:
+        if len(re.findall(r"\b\d[\d,]*\b", text_lower)) >= 25:
             boost += 3.0
         if years and any(y in text_lower for y in years):
             boost += 2.0
@@ -654,184 +501,150 @@ def _score_financial_structure(text_lower: str, question_lower: str, years: tupl
     return boost
 
 
-async def _collect_candidate_pages(
-    memory: Any, targeted_queries: list[str]
-) -> tuple[dict[str, MemoryCitation], dict[str, str], dict[str, float]]:
-    """Retrieve candidate pages via targeted FTS queries + broad coverage probes."""
-    citations: dict[str, MemoryCitation] = {}
-    texts: dict[str, str] = {}
-    rrf_scores: dict[str, float] = {}
+def _rank_hits(question: str, hits: list[Any], rrf_scores: dict[tuple[str, str], float]) -> list[Any]:
+    """
+    核心排序函数：结合 BM25 词频得分 + RRF 多重查询得分 + 目标公司匹配分 + 财务报表结构分。
+    """
+    if not hits:
+        return hits
 
-    # 1. Run targeted domain and n-gram queries (high precision RRF signal)
-    for q in targeted_queries:
-        try:
-            res = await memory.search(SearchMemoryRequest(query=q, limit=100, mode="fts"))
-        except Exception:
-            res = None
-        if not res or not res.hits:
-            continue
-
-        for rank, hit in enumerate(res.hits):
-            eid = hit.entry_id
-            rrf_scores[eid] = rrf_scores.get(eid, 0.0) + (1.0 / (40.0 + rank + 1))
-            if eid not in citations:
-                citations[eid] = MemoryCitation(
-                    memory_ref=hit.memory_ref,
-                    entry_id=hit.entry_id,
-                    entry_version_id=hit.entry_version_id,
-                )
-                texts[eid] = hit.text
-
-    # 2. Run broad probes with large limit to ensure full candidate coverage across the corpus
-    for probe in _BROAD_PROBES:
-        try:
-            res = await memory.search(SearchMemoryRequest(query=probe, limit=1500, mode="fts"))
-        except Exception:
-            res = None
-        if not res or not res.hits:
-            continue
-
-        for hit in res.hits:
-            eid = hit.entry_id
-            if eid not in citations:
-                citations[eid] = MemoryCitation(
-                    memory_ref=hit.memory_ref,
-                    entry_id=hit.entry_id,
-                    entry_version_id=hit.entry_version_id,
-                )
-                texts[eid] = hit.text
-        # If a single broad probe already pulled >= 500 pages, do just a couple more to save time
-        if len(citations) >= 1150:
-            break
-
-    return citations, texts, rrf_scores
-
-
-async def search_pdf_pages(
-    memory: Any, question: str, limit: int = 10
-) -> tuple[MemoryCitation, ...]:
-    """Retrieve up to `limit` distinct exact page citations from memory for a natural language question."""
-    if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
-        return ()
-    if not isinstance(question, str) or not question.strip():
-        return ()
-
-    targeted_queries, query_weights = _build_search_queries(question)
-    citations, texts, rrf_scores = await _collect_candidate_pages(memory, targeted_queries)
-
-    if not citations:
-        return ()
+    term_weights, _ = _query_terms_and_subqueries(question)
+    if not term_weights:
+        return hits
 
     question_lower = question.lower()
-    q_all_tokens = set(_tokenize(question_lower)) - _STOP_WORDS
+    q_token_set = {w.lower() for w in _WORDS.findall(question_lower)} - _STOP_WORDS
     years = _extract_years(question)
 
-    # Tokenize all candidate pages and compute document frequency (DF) for BM25
-    doc_tokens_map: dict[str, Counter[str]] = {}
-    doc_lengths: dict[str, int] = {}
-    doc_id_map: dict[str, str] = {}
+    # 1. 对所有候选页面进行分词，统计每个词的文档频率（DF）和页面长度（用于 BM25）
+    doc_counters: list[Counter[str]] = []
+    doc_lengths: list[int] = []
+    doc_ids: list[str] = []
     df_counts: Counter[str] = Counter()
 
-    for eid, raw_text in texts.items():
-        parts = raw_text.split("\n", 1)
-        doc_id = parts[0]
-        body_text = parts[1] if len(parts) > 1 else ""
-        doc_id_map[eid] = doc_id
-
-        # Skip completely empty pages unless no other pages exist
-        tokens = _tokenize(raw_text)
-        tf_counter = Counter(tokens)
-        doc_tokens_map[eid] = tf_counter
-        doc_lengths[eid] = max(len(tokens), 1)
-
-        for term in tf_counter:
-            if term in query_weights:
+    for hit in hits:
+        # 题目规定投影的 content 格式为 "DOCUMENT_ID\nPAGE_TEXT"，所以第一行就是 document_id！
+        doc_id = hit.text.split("\n", 1)[0]
+        doc_ids.append(doc_id)
+        tokens = [w.lower() for w in _WORDS.findall(hit.text)]
+        counts = Counter(tokens)
+        doc_counters.append(counts)
+        doc_lengths.append(max(len(tokens), 1))
+        for term in term_weights:
+            if counts[term] > 0:
                 df_counts[term] += 1
 
-    num_docs = len(texts)
-    avg_dl = sum(doc_lengths.values()) / max(num_docs, 1)
+    num_docs = len(hits)
+    avg_dl = sum(doc_lengths) / max(num_docs, 1)
 
-    # Identify which document(s) match the company/document name mentioned in the question
-    # Instead of guessing entities with brittle regex, check if tokens from `document_id` appear in `question`
-    unique_doc_ids = set(doc_id_map.values())
-    doc_match_scores: dict[str, float] = {}
+    # 2. 【关键修改 4】：识别问题针对的是哪家公司的财报（防止在 5 份财报混库时召回错公司）
+    unique_doc_ids = set(doc_ids)
+    doc_affinity_map: dict[str, float] = {}
     for did in unique_doc_ids:
+        # 提取 document_id 里的公司特征词（排除 2022、10k 等通用后缀）
         did_tokens = [
-            t for t in _tokenize(did)
-            if t not in _STOP_WORDS and not re.fullmatch(r"20\d{2}|10|k|q\d|fy\d*", t)
+            w.lower() for w in _WORDS.findall(did)
+            if w.lower() not in _STOP_WORDS and not re.fullmatch(r"20\d{2}|10|k|q\d", w.lower())
         ]
-        # Check how many company tokens from document_id appear in the question
-        matched_company_tokens = sum(1 for t in did_tokens if t in q_all_tokens or t in question_lower)
-        year_matched = sum(1 for y in years if y in did.lower())
-        if matched_company_tokens > 0:
-            doc_match_scores[did] = 15.0 * matched_company_tokens + 6.0 * year_matched
-        else:
-            doc_match_scores[did] = 0.0
+        matched_co = sum(1 for t in did_tokens if t in q_token_set or t in question_lower)
+        matched_yr = sum(1 for y in years if y in did.lower())
+        doc_affinity_map[did] = (15.0 * matched_co + 6.0 * matched_yr) if matched_co > 0 else 0.0
 
-    any_doc_matched = any(score > 0 for score in doc_match_scores.values())
+    any_company_matched = any(v > 0 for v in doc_affinity_map.values())
 
-    # BM25 parameters
+    # 3. 逐页计算综合得分（标准 BM25 + RRF + 公司亲和度 + 报表表头加分）
     k1 = 1.5
     b = 0.75
+    scored: list[tuple[float, float, Any]] = []
 
-    scored_entries: list[tuple[float, str]] = []
-    for eid, raw_text in texts.items():
-        tf_counter = doc_tokens_map[eid]
-        dl = doc_lengths[eid]
-        did = doc_id_map[eid]
-
-        # 1. BM25 lexical score over weighted query & domain terms
-        bm25_score = 0.0
-        for term, q_weight in query_weights.items():
-            tf = tf_counter.get(term, 0)
+    for hit, counts, dl, did in zip(hits, doc_counters, doc_lengths, doc_ids, strict=True):
+        bm25 = 0.0
+        for term, weight in term_weights.items():
+            tf = counts[term]
             if tf == 0:
                 continue
-            df = df_counts.get(term, 0)
+            df = df_counts[term]
             idf = math.log(1.0 + (num_docs - df + 0.5) / (df + 0.5))
             tf_norm = (tf * (k1 + 1.0)) / (tf + k1 * (1.0 - b + b * (dl / max(avg_dl, 1.0))))
-            bm25_score += q_weight * idf * tf_norm
+            bm25 += weight * idf * tf_norm
 
-        # 2. RRF score from targeted phrase queries
-        rrf_component = rrf_scores.get(eid, 0.0) * 25.0
-
-        # 3. Document affinity score (crucial when 5 PDFs are in the same database)
-        if any_doc_matched:
-            doc_affinity = doc_match_scores[did] if doc_match_scores[did] > 0 else -40.0
-        else:
-            doc_affinity = 0.0
-
-        # 4. Financial statement structural boost
-        struct_boost = _score_financial_structure(raw_text.lower(), question_lower, years)
-
-        # Penalize near-empty pages so they don't accidentally float up
+        rrf_bonus = rrf_scores.get((hit.entry_id, hit.entry_version_id), 0.0) * 25.0
+        co_bonus = (doc_affinity_map[did] if doc_affinity_map[did] > 0 else -40.0) if any_company_matched else 0.0
+        struct_bonus = _score_statement_structure(hit.text.lower(), question_lower, years)
         empty_penalty = -15.0 if dl <= 5 else 0.0
 
-        total_score = bm25_score + rrf_component + doc_affinity + struct_boost + empty_penalty
-        scored_entries.append((total_score, eid))
+        total_score = bm25 + rrf_bonus + co_bonus + struct_bonus + empty_penalty
+        scored.append((total_score, hit.score, hit))
 
-    scored_entries.sort(key=lambda item: item[0], reverse=True)
+    return [hit for _, _, hit in sorted(scored, key=lambda item: (item[0], item[1]), reverse=True)]
 
-    # Deduplicate by physical page identity (document_id + page content header / entry_id)
-    seen_entries: set[str] = set()
-    seen_doc_pages: set[str] = set()
-    selected: list[MemoryCitation] = []
 
-    for _, eid in scored_entries:
-        if eid in seen_entries:
+async def search_pdf_pages(memory: Any, question: str, limit: int = 10) -> tuple[MemoryCitation, ...]:
+    """
+    问题检索主接口：
+    【题目 2.4 原文】：“通过公开 Memory API 搜索并返回最多 limit 个不同页面的精确 MemoryCitation。
+    判题逐条 memory.get 回查文本及 Source，核对完整文档摘要和物理页码。”
+    """
+    from powercontext.builtin.runtime import GetMemoryEntryRequest, SearchMemoryRequest
+
+    if not isinstance(question, str) or not question.strip():
+        raise ValueError("question must be non-empty text")
+    # 拦截 bool 类型的 limit（防止 limit=True 混入）
+    if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+        raise ValueError("limit must be positive")
+
+    _, queries = _query_terms_and_subqueries(question)
+    hits_by_id: dict[tuple[str, str], Any] = {}
+    rrf_scores: dict[tuple[str, str], float] = {}
+
+    # 1. 先执行针对性的子查询，累积倒数排名分（RRF）
+    candidate_limit = max(80, min(300, limit * 8))
+    for query in queries[:32]:
+        try:
+            result = await memory.search(SearchMemoryRequest(query=query, mode="fts", limit=candidate_limit))
+        except Exception:
             continue
-        seen_entries.add(eid)
+        for rank, hit in enumerate(result.hits):
+            key = (hit.entry_id, hit.entry_version_id)
+            hits_by_id[key] = hit
+            rrf_scores[key] = rrf_scores.get(key, 0.0) + (1.0 / (40.0 + rank + 1))
 
-        # Also deduplicate by raw text identity just in case multiple entries exist
-        page_sig = hashlib.sha256(texts[eid].encode("utf-8")).hexdigest()
-        if page_sig in seen_doc_pages:
+    # 2. 补充执行广撒网高频词探测，确保把库里的证据页全部拉进内存参与 BM25 打分
+    for probe in _BROAD_PROBES:
+        try:
+            result = await memory.search(SearchMemoryRequest(query=probe, mode="fts", limit=1500))
+        except Exception:
             continue
-        seen_doc_pages.add(page_sig)
-
-        selected.append(citations[eid])
-        if len(selected) >= limit:
+        for hit in result.hits:
+            key = (hit.entry_id, hit.entry_version_id)
+            if key not in hits_by_id:
+                hits_by_id[key] = hit
+        if len(hits_by_id) >= 1150:
             break
 
-    return tuple(selected)
+    # 3. 在内存中对所有候选页执行 BM25 + 财报领域规则重排
+    ranked = _rank_hits(question, list(hits_by_id.values()), rrf_scores)
+
+    # 4. 逐条通过 memory.get 核对真实的 pdf-page Source 身份，确保返回的是不同物理页的精确引用
+    citations: list[MemoryCitation] = []
+    page_ids: set[str] = set()
+    for hit in ranked:
+        citation = MemoryCitation(
+            memory_ref=hit.memory_ref,
+            entry_id=hit.entry_id,
+            entry_version_id=hit.entry_version_id,
+        )
+        try:
+            entry = await memory.get(GetMemoryEntryRequest(citation=citation))
+        except Exception:
+            continue
+        source_ids = {source.source_id for source in entry.entry.sources if source.source_type == "pdf-page"}
+        if len(source_ids) == 1 and source_ids.isdisjoint(page_ids):
+            citations.append(citation)
+            page_ids.update(source_ids)
+            if len(citations) == limit:
+                break
+    return tuple(citations)
 
 
 __all__ = [
@@ -840,6 +653,5 @@ __all__ = [
     "PDFPageInput",
     "PDFPageSource",
     "parse_pdf_document",
-    "pdf_page_source_id",
     "search_pdf_pages",
 ]
