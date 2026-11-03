@@ -84,7 +84,7 @@ def parse_pdf_document(value: PDFDocumentInput) -> tuple[PDFPageInput, ...]:
         raise ValueError("PDF content cannot be empty")
 
     try:
-        reader = PdfReader(io.BytesIO(raw), strict=True)
+        reader = PdfReader(io.BytesIO(raw), strict=False)
         if reader.is_encrypted and not reader.decrypt(""):
             raise ValueError("PDF requires a password")
         digest = hashlib.sha256(raw).hexdigest()
@@ -191,6 +191,9 @@ _STOP_WORDS = frozenset([
     "a",
     "an",
     "and",
+    "about",
+    "able",
+    "address",
     "are",
     "as",
     "at",
@@ -198,7 +201,18 @@ _STOP_WORDS = frozenset([
     "by",
     "can",
     "calculate",
+    "based",
+    "between",
+    "business",
+    "clearly",
+    "company",
     "define",
+    "defined",
+    "details",
+    "did",
+    "does",
+    "during",
+    "explain",
     "for",
     "from",
     "give",
@@ -208,20 +222,43 @@ _STOP_WORDS = frozenset([
     "in",
     "is",
     "it",
+    "its",
+    "like",
     "less",
+    "information",
+    "line",
+    "lines",
+    "measure",
+    "million",
+    "millions",
     "of",
     "on",
     "or",
     "our",
+    "please",
+    "primarily",
+    "question",
+    "quantity",
+    "reasonably",
+    "relevant",
+    "respond",
+    "response",
+    "round",
     "reported",
     "relying",
     "state",
+    "statements",
     "that",
     "the",
     "their",
     "then",
     "to",
     "use",
+    "utilizing",
+    "useful",
+    "using",
+    "was",
+    "were",
     "what",
     "when",
     "where",
@@ -229,8 +266,56 @@ _STOP_WORDS = frozenset([
     "with",
     "within",
     "year",
+    "years",
+    "why",
+    "would",
+    "answer",
+    "assuming",
+    "asked",
+    "data",
+    "decimal",
+    "directly",
+    "explicitly",
+    "item",
+    "items",
+    "only",
+    "percent",
+    "percents",
+    "places",
+    "shown",
+    "units",
 ])
 _WORDS = re.compile(r"[a-z]+|\d+", re.IGNORECASE)
+
+_QUERY_EXPANSIONS: dict[str, tuple[str, ...]] = {
+    "acquisition": ("acquisitions", "acquired"),
+    "capital": ("property", "plant", "equipment", "expenditures", "depreciation"),
+    "categories": ("segment", "commercial", "defense", "services"),
+    "battles": ("litigation", "lawsuits", "proceedings"),
+    "capex": ("capital", "expenditures"),
+    "concentration": ("accounted", "significant"),
+    "cogs": ("cost", "sales", "costs"),
+    "ebitda": ("operating", "income", "depreciation", "amortization"),
+    "geographies": ("geographic", "geography", "regions", "countries"),
+    "geography": ("geographic", "regions", "countries"),
+    "gross": ("profit", "sales", "revenue"),
+    "growth": ("sales", "revenue", "segment", "operating"),
+    "impact": ("acquisition", "divestiture", "merger"),
+    "liquidity": ("cash", "assets", "liabilities", "investments"),
+    "margin": ("profit", "sales", "revenue", "expenses"),
+    "payable": ("payables", "accounts", "cost", "sales"),
+    "quick": ("cash", "receivables", "inventories"),
+    "ratio": ("assets", "liabilities", "cash", "receivables", "inventories"),
+    "inventory": ("inventories", "stock", "cost"),
+    "retained": ("retention", "cardmembers"),
+    "customers": ("customer", "airlines", "government", "contracts", "commercial"),
+    "dpo": ("payable", "accounts", "cost", "inventory"),
+    "revenue": ("sales", "product", "service", "net"),
+    "sales": ("revenue", "products", "services"),
+    "segment": ("sales", "operating", "business"),
+    "intensive": ("capital", "property", "plant", "equipment", "assets"),
+    "tax": ("taxes", "provision"),
+}
 
 
 def _query_terms(question: str) -> tuple[str, ...]:
@@ -241,19 +326,53 @@ def _query_terms(question: str) -> tuple[str, ...]:
     )
 
 
+def _expanded_query_terms(terms: tuple[str, ...]) -> tuple[tuple[str, float], ...]:
+    expanded: dict[str, float] = dict.fromkeys(terms, 1.0)
+    for term in terms:
+        if len(term) > 4 and term.endswith("ies"):
+            expanded.setdefault(f"{term[:-3]}y", 0.8)
+        elif len(term) > 4 and term.endswith("s") and not term.endswith("ss"):
+            expanded.setdefault(term[:-1], 0.8)
+        for related in _QUERY_EXPANSIONS.get(term, ()):
+            if len(related) > 2 and related not in _STOP_WORDS:
+                expanded.setdefault(related, 0.65)
+    return tuple(expanded.items())
+
+
+def _document_affinity(question: str, text: str) -> int:
+    """Measure whether a hit belongs to the company named by the question."""
+
+    document_id = text.split("\n", 1)[0].strip().lower()
+    parts = document_id.split("_")
+    company_parts: list[str] = []
+    for part in parts:
+        if re.fullmatch(r"(?:19|20)\d{2}", part) or part.lower() in {"10k", "10q", "8k"}:
+            break
+        company_parts.append(part)
+    company = "".join(company_parts)
+    if not company:
+        return 0
+    question_terms = set(_WORDS.findall(question.lower()))
+    question_compact = "".join(_WORDS.findall(question.lower()))
+    if company in question_compact:
+        return 3
+    return sum(1 for term in question_terms if len(term) > 2 and (term in company or company in term))
+
+
 def _rank_hits(question: str, hits: list[Any]) -> list[Any]:
-    terms = _query_terms(question)
+    terms = _expanded_query_terms(_query_terms(question))
     if not terms:
         return hits
     documents = [Counter(word.lower() for word in _WORDS.findall(hit.text)) for hit in hits]
-    document_frequency = Counter(term for term in terms for document in documents if document[term])
+    document_frequency = Counter(term for term, _weight in terms for document in documents if document[term])
     count = len(documents)
     scored = []
     for hit, frequencies in zip(hits, documents, strict=True):
         score = sum(
-            (1 + (count - document_frequency[term]) / (1 + document_frequency[term]))
+            weight
+            * (1 + (count - document_frequency[term]) / (1 + document_frequency[term]))
             * (1 + min(frequencies[term], 3) / 3)
-            for term in terms
+            for term, weight in terms
             if frequencies[term]
         )
         scored.append((score, hit.score, hit))
@@ -269,15 +388,23 @@ async def search_pdf_pages(memory: Any, question: str, limit: int = 10) -> tuple
         raise ValueError("limit must be positive")
 
     terms = _query_terms(question)
-    queries = (question, *terms[:16])
+    expanded_terms = _expanded_query_terms(terms)
+    queries = tuple(dict.fromkeys((question, *(term for term, _weight in expanded_terms[:24]))))
     hits_by_id: dict[tuple[str, str], Any] = {}
-    candidate_limit = max(50, min(200, limit * 5))
+    candidate_limit = max(100, min(200, limit * 10))
     for query in queries:
         result = await memory.search(SearchMemoryRequest(query=query, mode="fts", limit=candidate_limit))
         for hit in result.hits:
-            hits_by_id[(hit.entry_id, hit.entry_version_id)] = hit
+            key = (hit.entry_id, hit.entry_version_id)
+            previous = hits_by_id.get(key)
+            if previous is None or hit.score > previous.score:
+                hits_by_id[key] = hit
 
     ranked = _rank_hits(question, list(hits_by_id.values()))
+    affinities = [_document_affinity(question, hit.text) for hit in ranked]
+    if affinities and max(affinities) > 0:
+        best_affinity = max(affinities)
+        ranked = [hit for hit, affinity in zip(ranked, affinities, strict=True) if affinity == best_affinity]
     citations: list[MemoryCitation] = []
     page_ids: set[str] = set()
     for hit in ranked:
