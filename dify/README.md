@@ -141,23 +141,31 @@ docker compose -f docker-compose.yaml \
 
 ### 运行截图
 
-以下截图展示 Chatflow 主链路和应用预览。两个 Dify 会话中后续会话的实际记忆读取，以及 SeekDB 数据核验见 `evidence/2026-11-04-live-run.md`。
+以下为已发布应用、实际对话和工作流执行截图。两个会话的 SeekDB 读写核验见 `evidence/2026-11-04-live-run.md`。
 
-**Dify Chatflow 主链路：读取记忆 → Qwen 回复 → 保存回合 → 回复**
+**已发布的 Dify Chatflow**
 
-![Dify Chatflow 主链路](evidence/screenshots/01-chatflow-topology.png)
+![已发布的 Dify Chatflow](evidence/screenshots/01-published-chatflow.png)
 
-**预览：首次约会输入与闻溪回复**
+**Dify 应用运行日志**
 
-![Dify 预览首次交互](evidence/screenshots/02-preview-first-turn.png)
+![Dify 应用运行日志](evidence/screenshots/02-application-logs.png)
 
-**预览：连续互动与第二轮回复**
+**会话一：保存偏好并继续互动**
 
-![Dify 预览后续交互](evidence/screenshots/03-preview-follow-up.png)
+![会话一记录](evidence/screenshots/03-conversation-one.png)
 
-**本次服务器运行截图：待作者上传**
+**会话二：读取并回应已保存的偏好**
 
-上传位置：`evidence/screenshots/04-live-validation.png`
+![会话二记录](evidence/screenshots/04-conversation-two.png)
+
+**已发布应用访问入口**
+
+![Dify 应用访问入口](evidence/screenshots/05-access-point.png)
+
+**会话二的 Chatflow 节点执行记录**
+
+![Chatflow 节点执行记录](evidence/screenshots/06-chatflow-execution.png)
 
 ### 已发布应用 API 复现工具
 
