@@ -53,14 +53,26 @@ OCEANBASE_VECTOR_USER=dify
 OCEANBASE_VECTOR_PASSWORD=<SEEKDB_PASSWORD>
 OCEANBASE_VECTOR_DATABASE=dify
 SSRF_PROXY_ALLOW_PRIVATE_DOMAINS=heartguide-memory
-# If this override is placed into an existing Dify checkout instead of this
-# repository's dify/deploy/docker directory, use the actual runtime path:
-# HEARTGUIDE_RUNTIME_DIR=/root/difypg/dify/runtime
+# Existing Dify checkout only: absolute path to this repository's runtime dir.
+# HEARTGUIDE_RUNTIME_DIR=/opt/powercontext/dify/runtime
 ```
 
 `heartguide-memory` 只加入 Docker 内部网络，没有 `ports` 映射。`SSRF_PROXY_ALLOW_PRIVATE_DOMAINS` 只放行这个固定服务名，使 Dify HTTP Request 节点能通过 SSRF proxy 访问它；不要改成放行整个私网网段。修改 SSRF 配置后需要重建 `ssrf_proxy`。
 
-如果沿用服务器已有的上游 Dify 目录 `/root/difypg/dify/docker`，还要把项目的 `runtime/heartguide_memory.py` 放到 `/root/difypg/dify/runtime/`，并在该 `.env` 中设置 `HEARTGUIDE_RUNTIME_DIR=/root/difypg/dify/runtime`。在本仓库的标准目录执行时可以省略该变量。
+如果在已有 Dify 部署中使用本服务，Compose 基础文件和 `.env` 必须来自正在运行的 Dify 部署，overlay 和运行时代码来自本仓库。以目标服务器为例：
+
+```bash
+cd /opt/dify/docker
+# In .env, set HEARTGUIDE_RUNTIME_DIR=/opt/powercontext/dify/runtime
+docker compose -f docker-compose.yaml \
+  -f /opt/powercontext/dify/deploy/docker/docker-compose.heartguide.yaml \
+  config --quiet
+docker compose -f docker-compose.yaml \
+  -f /opt/powercontext/dify/deploy/docker/docker-compose.heartguide.yaml \
+  up -d --force-recreate ssrf_proxy heartguide-memory
+```
+
+在本仓库随附的完整 Dify Compose 目录中部署时，可直接从 `deploy/docker` 执行下面的命令并省略 `HEARTGUIDE_RUNTIME_DIR`。
 
 启动记忆服务并检查 Compose 配置：
 
@@ -192,7 +204,7 @@ docker compose -f docker-compose.yaml -f docker-compose.heartguide.yaml \
 
 ## 当前仓库验证状态
 
-`evidence/2026-11-01-runtime.md` 和 `evidence/mock-run.ndjson` 是历史 mock/部署记录，不是本次真实 Dify 运行证明。`evidence/2026-11-02-runtime.md` 记录了检查时服务器的基础状态：Dify 1.18.0 健康、Tongyi provider 已配置，但当时还没有导入本应用，也没有执行本次 Chatflow 的 API 和 SeekDB 应用读写。因此提交前应按本 README 在目标服务器重新导入、发布、运行，并把脱敏后的真实 `dify-run-*.ndjson` 和 SQL 结果补入 `evidence/`。
+`evidence/2026-11-01-runtime.md` 和 `evidence/mock-run.ndjson` 是历史 mock/部署记录，不是 Dify 运行证明。`evidence/2026-11-02-runtime.md` 是更早的服务器基线。最新的 `evidence/2026-11-04-runtime.md` 证明目标服务器上的记忆服务已连接真实 SeekDB，并通过服务 HTTP 接口完成跨会话读写及 SQL 回读；该记录也明确标注这是确定性 mock，不是 Dify Chatflow 运行。当前尚无本应用的 Dify 导入/发布记录或真实 Chatflow API 运行记录，基础验收仍未完成。完成控制台导入、发布和 API 样例后，应将脱敏后的真实 `dify-run-*.ndjson` 及对应 SeekDB SQL 结果补入 `evidence/`。
 
 ## 来源与限制
 
